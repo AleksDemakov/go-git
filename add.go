@@ -29,8 +29,11 @@ func Add(filepath_ string) {
     if _, err := os.Stat(absPath); err != nil {
         panic(fmt.Sprintf("file %s does not exist\n", absPath))
     }
+    // save "object" of file to .go-git
+    gogit := findLocalRepo(absPath)
+    fmt.Printf("gogit=%s\n", gogit)
     obj := newObject(absPath)
-    f, err := os.Create(filepath.Join(filepath.Dir(absPath), obj.hash))
+    f, err := os.Create(filepath.Join(gogit,"objects", obj.hash))
     if err != nil{
         panic(err)
     }
