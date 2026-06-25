@@ -1,52 +1,76 @@
 package main
 
-
 import (
 	"fmt"
-    "os"
+	"os"
 	"path/filepath"
 )
 
-// Looks for .go-git directory by walking upside toward root dir
-func findLocalRepo(curDir string) string {
-
-    if curDir == "/" {
-        panic(fmt.Sprintln("there is no go-git repository"))
-    }
-    if _, err := os.Stat(filepath.Join(curDir,".go-git")); err != nil {
-        curDir1 := filepath.Dir(curDir)
-        result := findLocalRepo(curDir1)
-        return result
-    }else{
-        return curDir+"/.go-git/"
-    }
-
+func SearchGit() {
+	absPath, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(absPath, ".go-git")); os.IsNotExist(err) {
+			dir := filepath.Dir(absPath)
+			if dir == absPath {
+				fmt.Println("file not exist")
+				return
+			}
+			absPath = dir
+		} else {
+			fmt.Println(filepath.Join(absPath, ".go-git")) // filepath.Join(absPath, ".go-git") - it is a way to .go.git
+			return
+		}
+	}
 }
+func ReadArg(command string /*, NameFile strin */) {
+	// if command == "add" {
+	// 	// fmt.Println(1)
+	// 	SelfPathFile, Myerror := os.Executable()
+	// 	PathFile, Nameerror := filepath.Abs(NameFile)
 
-func ReadArg(command string, NameFile string) {
-	if command == "add" {
-        Add(NameFile)
-		
-	} else if command == "commit" {
-        workingDir, _ := os.Getwd()
-        gog := findLocalRepo(workingDir)
-		fmt.Println(gog)
+	// 	fmt.Println(SelfPathFile)
+	// 	if Myerror != nil || Nameerror != nil {
+	// 		fmt.Println(Myerror)
+	// 		fmt.Println(Nameerror)
+	// 	} else {
+
+	// 		RelPath, error := filepath.Rel(SelfPathFile, PathFile)
+	// 		if error != nil {
+	// 			fmt.Println(error)
+	// 		} else {
+	// 			fmt.Println(RelPath)
+	// 		}
+	// 	}
+
+	//}
+	if command == "commit" {
+		fmt.Println(2)
 	} else if command == "push" {
 		fmt.Println(3)
+	} else if command == "init" {
+		dir := []string{".go-git", ".go-git/Config", ".go-git/Commits", ".go-git/CommitsObjects", ".go-git/Objects"}
+
+		for _, name := range dir {
+			err := os.Mkdir(name, 0777) // создает директороию, если ее не существует
+			if err != nil {
+				panic(err) // Останавливает программу, если ошибка есть
+			}
+		}
 	} else {
-		fmt.Println("Failed command")
+		fmt.Println("Faild command")
 	}
 }
 
 func main() {
 
-	command := os.Args[1]
+	command := os.Args[1] //Только ему всегда надо указывать файл како-либо похоже
 
-    var NameFile string
-    if len(os.Args) > 2 {
-        NameFile = os.Args[2]
-    }
+	//NameFile := os.Args[2]
 
-	ReadArg(command, NameFile)
+	ReadArg(command /*, NameFile*/)
+	SearchGit()
 
 }
