@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func SearchGit() {
+func SearchGit() string {
 	absPath, err := os.Getwd()
 	if err != nil {
 		panic(err)
@@ -16,37 +16,19 @@ func SearchGit() {
 			dir := filepath.Dir(absPath)
 			if dir == absPath {
 				fmt.Println("file not exist")
-				return
+				panic(fmt.Sprintln("there is no go-git repository"))
 			}
 			absPath = dir
 		} else {
-			fmt.Println(filepath.Join(absPath, ".go-git")) // filepath.Join(absPath, ".go-git") - it is a way to .go.git
-			return
+			return filepath.Join(absPath, ".go-git")
 		}
 	}
 }
-func ReadArg(command string /*, NameFile strin */) {
-	// if command == "add" {
-	// 	// fmt.Println(1)
-	// 	SelfPathFile, Myerror := os.Executable()
-	// 	PathFile, Nameerror := filepath.Abs(NameFile)
+func ReadArg(command string, NameFile string) {
+	if command == "add" {
+		Add(NameFile)
 
-	// 	fmt.Println(SelfPathFile)
-	// 	if Myerror != nil || Nameerror != nil {
-	// 		fmt.Println(Myerror)
-	// 		fmt.Println(Nameerror)
-	// 	} else {
-
-	// 		RelPath, error := filepath.Rel(SelfPathFile, PathFile)
-	// 		if error != nil {
-	// 			fmt.Println(error)
-	// 		} else {
-	// 			fmt.Println(RelPath)
-	// 		}
-	// 	}
-
-	//}
-	if command == "commit" {
+	} else if command == "commit" {
 		fmt.Println(2)
 	} else if command == "push" {
 		fmt.Println(3)
@@ -68,9 +50,9 @@ func main() {
 
 	command := os.Args[1] //Только ему всегда надо указывать файл како-либо похоже
 
-	//NameFile := os.Args[2]
+	NameFile := os.Args[2]
 
-	ReadArg(command /*, NameFile*/)
+	ReadArg(command, NameFile)
 	SearchGit()
 
 }
