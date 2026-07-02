@@ -1,29 +1,31 @@
 package main
 
 import (
+	"Crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
-    "math/rand"
-    "time"
+	"time"
 )
 
 type object struct {
-	hash    string
+	hash    [32]byte // set [32]byte instead of string
 	path    string
 	size    int32
 	content string
 }
 
 func randomString(length int) string {
-    rand.Seed(time.Now().UnixNano())
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    result := make([]byte, length)
+	rand.Seed(time.Now().UnixNano())
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
 
-    for i:=0;i<length;i++ {
-        result[i] = charset[rand.Intn(len(charset))]
-    }
-    return string(result)
+	for i := 0; i < length; i++ {
+		result[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(result)
 }
 
 func newObject(filepath_ string) *object {
@@ -31,7 +33,7 @@ func newObject(filepath_ string) *object {
 	if err != nil {
 		panic(err)
 	}
-	obj := object{randomString(8), filepath_, 42, string(content)}
+	obj := object{sha256.Sum256([]byte(content)), filepath_, 42, string(content)}
 	return &obj
 }
 
@@ -46,14 +48,14 @@ func Add(filepath_ string) {
 	// save "object" of file in .go-git/Objects
 	gogit := SearchGit()
 	obj := newObject(absPath)
-	objects_file, _ := os.Create(filepath.Join(gogit, "objects", obj.hash))
-    defer objects_file.Close()
+	objects_file, _ := os.Create(filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
+	defer objects_file.Close()
 	objects_file.Write([]byte(obj.content))
 
-    index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
-    if err != nil{
-        panic(err)
-    }
-    index_file.WriteString(obj.hash)
+	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		panic(err)
+	}
+	index_file.Write(obj.hash[:]) //change from Writestring on Write and make [:]
 
 }
