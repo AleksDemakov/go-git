@@ -1,7 +1,7 @@
 package main
 
 import (
-	"Crypto/sha256"
+	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -11,7 +11,7 @@ import (
 )
 
 type object struct {
-	hash    [32]byte // set [32]byte instead of string
+	hash    [20]byte // set [32]byte instead of string
 	path    string
 	size    int32
 	content string
@@ -33,7 +33,7 @@ func newObject(filepath_ string) *object {
 	if err != nil {
 		panic(err)
 	}
-	obj := object{sha256.Sum256([]byte(content)), filepath_, 42, string(content)}
+	obj := object{sha1.Sum([]byte(content)), filepath_, 42, string(content)}
 	return &obj
 }
 
@@ -53,9 +53,10 @@ func Add(filepath_ string) {
 	objects_file.Write([]byte(obj.content))
 
 	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
+    defer index_file.Close()
 	if err != nil {
 		panic(err)
 	}
-	index_file.Write(obj.hash[:]) //change from Writestring on Write and make [:]
+	index_file.WriteString(hex.EncodeToString(obj.hash[:]) + "\n") 
 
 }
