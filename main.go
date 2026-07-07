@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,28 +25,50 @@ func SearchGit() string {
 		}
 	}
 }
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+
+	return !errors.Is(err, os.ErrNotExist)
+}
 func ReadArg(command string, NameFile string) {
 	if command == "add" {
 		Add(NameFile)
 
 	} else if command == "commit" {
-        Commit(NameFile)
+		Commit(NameFile)
 	} else if command == "push" {
 		fmt.Println(3)
 	} else if command == "init" {
 		dirs := []string{".go-git", ".go-git/commits", ".go-git/commits-objects", ".go-git/objects"}
-        files := []string{".go-git/index", ".go-git/config"}
+		files := []string{".go-git/index", ".go-git/config"}
+		// for _, name := range dirs {
+		// 	if err := os.Mkdir(name, 0777); err != nil {
+		// 		panic(err)
+		// 	}
+		// }
+		// for _, name := range files {
+		// 	if _, err := os.Create(name); err != nil {
+		// 		panic(err)
+		// 	}
+		// }
 
 		for _, name := range dirs {
-            if err := os.Mkdir(name, 0777); err != nil {
-				panic(err) // Останавливает программу, если ошибка есть
+			if !exists(name) {
+				if err := os.Mkdir(name, 0777); err != nil {
+					panic(err)
+				}
 			}
 		}
-        for _, name := range files {
-            if _, err := os.Create(name); err != nil {
-                panic(err)
-            }
-        }
+		for _, name := range files {
+			if !exists(name) {
+				file, err := os.Create(name)
+				if err != nil {
+					panic(err)
+				}
+				defer file.Close()
+			}
+		}
 	} else {
 		fmt.Println("Failed command")
 	}
@@ -53,12 +76,12 @@ func ReadArg(command string, NameFile string) {
 
 func main() {
 
-	command := os.Args[1] 
+	command := os.Args[1]
 
-    var NameFile string
-    if len(os.Args) > 2 {
-        NameFile = os.Args[2]
-    }
+	var NameFile string
+	if len(os.Args) > 2 {
+		NameFile = os.Args[2]
+	}
 
 	ReadArg(command, NameFile)
 

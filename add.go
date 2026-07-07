@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -56,6 +57,30 @@ func mergeFiles(content string, pathtoWrite string) {
 
 }
 
+func unMergeFiles(pathToMergedFile string) string {
+
+	file, err := os.OpenFile(pathToMergedFile, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	gr, err := gzip.NewReader(file)
+	if err != nil {
+		panic(err)
+	}
+
+	defer gr.Close()
+
+	content, err := io.ReadAll(gr)
+
+	if err != nil {
+		panic(err)
+	}
+	return string(content)
+
+}
+
 func Add(filepath_ string) {
 	workingDir, _ := os.Getwd()
 	absPath := filepath.Join(workingDir, filepath_)
@@ -73,10 +98,14 @@ func Add(filepath_ string) {
 	mergeFiles(obj.content, filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:])))
 
 	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
-	defer index_file.Close()
+
 	if err != nil {
 		panic(err)
 	}
+	defer index_file.Close()
+
 	index_file.WriteString(hex.EncodeToString(obj.hash[:]) + "\n")
+
+	fmt.Println(unMergeFiles(filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:]))))
 
 }
