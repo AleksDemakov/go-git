@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -37,6 +38,24 @@ func newObject(filepath_ string) *object {
 	return &obj
 }
 
+func mergeFiles(content string, pathtoWrite string) {
+	f, err := os.OpenFile(pathtoWrite, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	gw := gzip.NewWriter(f)
+
+	defer gw.Close()
+
+	_, err = gw.Write([]byte(content))
+	if err != nil {
+		panic(err)
+	}
+
+}
+
 func Add(filepath_ string) {
 	workingDir, _ := os.Getwd()
 	absPath := filepath.Join(workingDir, filepath_)
@@ -50,13 +69,14 @@ func Add(filepath_ string) {
 	obj := newObject(absPath)
 	objects_file, _ := os.Create(filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
 	defer objects_file.Close()
-	objects_file.Write([]byte(obj.content))
+	//objects_file.Write([]byte(obj.content))
+	mergeFiles(obj.content, filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:])))
 
 	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
-    defer index_file.Close()
+	defer index_file.Close()
 	if err != nil {
 		panic(err)
 	}
-	index_file.WriteString(hex.EncodeToString(obj.hash[:]) + "\n") 
+	index_file.WriteString(hex.EncodeToString(obj.hash[:]) + "\n")
 
 }
