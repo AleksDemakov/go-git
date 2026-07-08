@@ -2,8 +2,10 @@ package storage
 import (
         "database/sql"
         "os"
+        "fmt"
         //"path/filepath"
         _ "modernc.org/sqlite"
+        "encoding/hex"
 
         types "github.com/Clorter/go-git/types"
 )
@@ -53,32 +55,35 @@ func Get() types.Object{
     }
 
     for rows.Next() {
-            var obj types.Object
-            var test string
-            if err = rows.Scan(&obj.Hash, &obj.Path, &test, &obj.Content); err != nil {
-                    panic(err)
-            }
+        var obj types.Object
+        var test string
+        var hash string
+        if err = rows.Scan(&hash, &obj.Path, &test, &obj.Content); err != nil {
+            panic(err)
+        }
 
-           return obj
+       return obj
     }
 
     if err = rows.Err(); err != nil {
             panic(err)
     }
-
-    return types.Object{"da","da", 64.0, "da"} 
+    hash, _ := hex.DecodeString("da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
 }
 
 func Add(obj types.Object){
+    Init()
     db, err := sql.Open("sqlite", "sqlite.db")
     if err != nil {
         panic(err)
     }
     defer db.Close()
 
+    //fmt.Println(obj.Hash)
     if _, err = db.Exec(`
     insert into objects (hash, path, size, content) values (?, ?, ?, ?);
-    `, obj.Hash, obj.Path, obj.Size, obj.Content); err != nil {
+    `, hex.EncodeToString(obj.Hash[:]), obj.Path, obj.Size, obj.Content); err != nil {
         panic(err)
     }
 }

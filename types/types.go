@@ -7,8 +7,14 @@ type Commit struct {
 	Message string
 }
 
+// a link struct between commits and commited files
+type Commit_objects struct {
+	Commit_hash [20]byte
+	Objects     []byte
+}
+
 type Object struct {
-	Hash    string
+	Hash    [20]byte 
 	Path    string
 	Size    int32
 	Content string
