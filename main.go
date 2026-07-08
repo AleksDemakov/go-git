@@ -29,30 +29,37 @@ func ReadArg(command string, NameFile string) {
 		Add(NameFile)
 
 	} else if command == "commit" {
-		fmt.Println(2)
+        Commit(NameFile)
 	} else if command == "push" {
 		fmt.Println(3)
 	} else if command == "init" {
-		dir := []string{".go-git", ".go-git/Config", ".go-git/Commits", ".go-git/CommitsObjects", ".go-git/Objects"}
+		dirs := []string{".go-git", ".go-git/commits", ".go-git/commits-objects", ".go-git/objects"}
+        files := []string{".go-git/index", ".go-git/config"}
 
-		for _, name := range dir {
-			err := os.Mkdir(name, 0777) // создает директороию, если ее не существует
-			if err != nil {
+		for _, name := range dirs {
+            if err := os.Mkdir(name, 0777); err != nil {
 				panic(err) // Останавливает программу, если ошибка есть
 			}
 		}
+        for _, name := range files {
+            if _, err := os.Create(name); err != nil {
+                panic(err)
+            }
+        }
 	} else {
-		fmt.Println("Faild command")
+		fmt.Println("Failed command")
 	}
 }
 
 func main() {
 
-	command := os.Args[1] //Только ему всегда надо указывать файл како-либо похоже
+	command := os.Args[1] 
 
-	NameFile := os.Args[2]
+    var NameFile string
+    if len(os.Args) > 2 {
+        NameFile = os.Args[2]
+    }
 
 	ReadArg(command, NameFile)
-	SearchGit()
 
 }

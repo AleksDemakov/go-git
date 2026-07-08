@@ -1,16 +1,19 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 
     types "github.com/Clorter/go-git/types"
-    storage "github.com/Clorter/go-git/storage"
 )
 
 
 func newObject(filepath_ string) *types.Object {
+
 	content, err := os.ReadFile(filepath_)
 	if err != nil {
 		panic(err)
@@ -27,15 +30,18 @@ func Add(filepath_ string) {
 	if _, err := os.Stat(absPath); err != nil {
 		panic(fmt.Sprintf("file %s does not exist\n", absPath))
 	}
-	// save "object" of file to .go-git
+	// save "object" of file in .go-git/Objects
 	gogit := SearchGit()
-	fmt.Printf("gogit=%s\n", gogit)
 	obj := newObject(absPath)
-	f, err := os.Create(filepath.Join(gogit, "objects", obj.Hash))
+	objects_file, _ := os.Create(filepath.Join(gogit, "objects", hex.EncodeToString(obj.hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
+	defer objects_file.Close()
+	objects_file.Write([]byte(obj.content))
+
+	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
+    defer index_file.Close()
 	if err != nil {
 		panic(err)
 	}
-	f.Write([]byte(obj.Content))
-	f.Close()
+	index_file.WriteString(hex.EncodeToString(obj.hash[:]) + "\n") 
 
 }
