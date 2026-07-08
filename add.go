@@ -4,21 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+    types "github.com/Clorter/go-git/types"
+    storage "github.com/Clorter/go-git/storage"
 )
 
-type object struct {
-	hash    string
-	path    string
-	size    int32
-	content string
-}
 
-func newObject(filepath_ string) *object {
+func newObject(filepath_ string) *types.Object {
 	content, err := os.ReadFile(filepath_)
 	if err != nil {
 		panic(err)
 	}
-	obj := object{"42", filepath_, 42, string(content)}
+	obj := types.Object{"42", filepath_, 42, string(content)}
 	return &obj
 }
 
@@ -34,10 +31,11 @@ func Add(filepath_ string) {
 	gogit := SearchGit()
 	fmt.Printf("gogit=%s\n", gogit)
 	obj := newObject(absPath)
-	f, err := os.Create(filepath.Join(gogit, "objects", obj.hash))
+	f, err := os.Create(filepath.Join(gogit, "objects", obj.Hash))
 	if err != nil {
 		panic(err)
 	}
-	f.Write([]byte(obj.content))
+	f.Write([]byte(obj.Content))
 	f.Close()
+
 }
