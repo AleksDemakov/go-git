@@ -13,8 +13,6 @@ var writer storage.Storage
 func ReadArg(command string, arg string) {
 	if command == "add" {
 		Add(arg) // arg is a file name
-        obj1 := writer.Get()
-        fmt.Println(obj1)
 	} else if command == "commit" {
         Commit(arg) // arg is a commit message
 	} else if command == "push" {

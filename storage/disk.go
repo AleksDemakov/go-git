@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
     "path/filepath"
     "fmt"
+	"crypto/sha1"
+
     types "github.com/Clorter/go-git/types"
 )
 
@@ -46,8 +48,8 @@ func (ds Disk_storage) Init(){
 }
 
 func (ds Disk_storage) Add(obj types.Object){
-    gogit := SearchGit()
-	objects_file, err := os.Create(filepath.Join(gogit, "objects", hex.EncodeToString(obj.Hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
+    dotgogit := SearchGit()
+	objects_file, err := os.Create(filepath.Join(dotgogit, "objects", hex.EncodeToString(obj.Hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
 	if err != nil {
 		panic(err)
 	} 
@@ -55,7 +57,7 @@ func (ds Disk_storage) Add(obj types.Object){
     
 	objects_file.Write([]byte(obj.Content))
 
-	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
+	index_file, err := os.OpenFile(filepath.Join(dotgogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -67,4 +69,35 @@ func (ds Disk_storage) Add(obj types.Object){
 func (ds Disk_storage) Get() types.Object{
     hash, _ := hex.DecodeString("da39a3ee5e6b4b0d3255bfef95601890afd80709")
     return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
+}
+
+func new_commit_objects(commit_hash [20]byte) {
+	gogit := SearchGit()
+
+    // read Index for staged files to include in the commit
+	index_bytes, err := os.ReadFile(filepath.Join(gogit, "index"))
+	if err != nil {
+		panic(err)
+	}
+
+	commit_objects_instance := types.Commit_objects{commit_hash, index_bytes}
+
+    f, err := os.Create(filepath.Join(gogit, "commits-objects", hex.EncodeToString(commit_hash[:])))
+    defer f.Close()
+    if err != nil {
+       panic(err)
+    }
+    f.Write([]byte(commit_objects_instance.Objects))
+}
+func (ds Disk_storage) Commit(message string){
+	commit_hash := sha1.Sum([]byte(message))
+	commit := types.Commit{commit_hash, "author", "email", message}
+    dotgogit := SearchGit()
+	f, err := os.Create(filepath.Join(dotgogit, "commits", hex.EncodeToString(commit.Hash[:]))) 
+	if err != nil {
+		panic(err)
+	}
+	f.Write([]byte(commit.Message))
+	f.Close()
+	new_commit_objects(commit_hash)
 }

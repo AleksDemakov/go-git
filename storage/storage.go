@@ -8,5 +8,6 @@ type Storage interface{
     Init() 
     Add(types.Object)
     Get() types.Object
+    Commit(string)
 }
 
