@@ -2,14 +2,18 @@ package storage
 import (
         "database/sql"
         "os"
-        "fmt"
+        //"fmt"
         //"path/filepath"
         _ "modernc.org/sqlite"
         "encoding/hex"
 
         types "github.com/Clorter/go-git/types"
 )
-func Init(){
+
+type Database_storage struct{
+}
+
+func (ds Database_storage) Init(){
     if _, err := os.Create("sqlite.db"); err!=nil {
         panic(err)
     } 
@@ -43,7 +47,7 @@ create table commit_objects(
     
 }
 
-func Get() types.Object{
+func (ds Database_storage) Get() types.Object{
     db, err := sql.Open("sqlite", "sqlite.db")
     if err != nil {
         panic(err)
@@ -72,8 +76,7 @@ func Get() types.Object{
     return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
 }
 
-func Add(obj types.Object){
-    Init()
+func (ds Database_storage) Add(obj types.Object){
     db, err := sql.Open("sqlite", "sqlite.db")
     if err != nil {
         panic(err)

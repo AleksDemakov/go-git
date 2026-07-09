@@ -1,0 +1,70 @@
+package storage
+
+import (
+    "os"
+	"encoding/hex"
+    "path/filepath"
+    "fmt"
+    types "github.com/Clorter/go-git/types"
+)
+
+type Disk_storage struct{}
+
+func SearchGit() string {
+	absPath, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(absPath, ".go-git")); os.IsNotExist(err) {
+			dir := filepath.Dir(absPath)
+			if dir == absPath {
+				fmt.Println("file not exist")
+				panic(fmt.Sprintln("there is no go-git repository"))
+			}
+			absPath = dir
+		} else {
+			return filepath.Join(absPath, ".go-git")
+		}
+	}
+}
+
+func (ds Disk_storage) Init(){
+		dirs := []string{".go-git", ".go-git/commits", ".go-git/commits-objects", ".go-git/objects"}
+        files := []string{".go-git/index", ".go-git/config"}
+
+		for _, name := range dirs {
+            if err := os.Mkdir(name, 0777); err != nil {
+				panic(err) // Останавливает программу, если ошибка есть
+			}
+		}
+        for _, name := range files {
+            if _, err := os.Create(name); err != nil {
+                panic(err)
+            }
+        }
+}
+
+func (ds Disk_storage) Add(obj types.Object){
+    gogit := SearchGit()
+	objects_file, err := os.Create(filepath.Join(gogit, "objects", hex.EncodeToString(obj.Hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
+	if err != nil {
+		panic(err)
+	} 
+    defer objects_file.Close()
+    
+	objects_file.Write([]byte(obj.Content))
+
+	index_file, err := os.OpenFile(filepath.Join(gogit, "index"), os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		panic(err)
+	}
+    defer index_file.Close()
+    
+	index_file.WriteString(hex.EncodeToString(obj.Hash[:]) + "\n") 
+}
+
+func (ds Disk_storage) Get() types.Object{
+    hash, _ := hex.DecodeString("da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
+}
