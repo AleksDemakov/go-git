@@ -2,6 +2,7 @@ package storage
 import (
         "database/sql"
         "os"
+		"strconv"
         //"fmt"
         //"path/filepath"
         _ "modernc.org/sqlite"
@@ -42,12 +43,9 @@ create table commit_objects(
     `) ; err != nil {
         panic(err)
     }
-
-    
-    
 }
 
-func (ds Database_storage) Get() types.Object{
+func (ds Database_storage) FilesAll() []types.Object{
     db, err := sql.Open("sqlite", "sqlite.db")
     if err != nil {
         panic(err)
@@ -55,25 +53,24 @@ func (ds Database_storage) Get() types.Object{
     defer db.Close()
     rows, err := db.Query("select hash, path, size, content from objects;")
     if err != nil {
-            panic(err)
+		panic(err)
     }
 
+	var files []types.Object
     for rows.Next() {
         var obj types.Object
-        var test string
-        var hash string
-        if err = rows.Scan(&hash, &obj.Path, &test, &obj.Content); err != nil {
+        var size_str string
+        var hash_str string
+        if err = rows.Scan(&hash_str, &obj.Path, &size_str, &obj.Content); err != nil {
             panic(err)
         }
-
-       return obj
+		hash_slice, _ := hex.DecodeString(hash_str)
+		copy(obj.Hash[:], hash_slice)
+		size_64, _ := strconv.ParseInt(size_str, 10, 32)
+		obj.Size = int32(size_64)
+		files = append(files, obj)
     }
-
-    if err = rows.Err(); err != nil {
-            panic(err)
-    }
-    hash, _ := hex.DecodeString("da39a3ee5e6b4b0d3255bfef95601890afd80709")
-    return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
+	return files
 }
 
 func (ds Database_storage) Add(obj types.Object){
@@ -83,7 +80,7 @@ func (ds Database_storage) Add(obj types.Object){
     }
     defer db.Close()
 
-    //fmt.Println(obj.Hash)
+    //fmt.Printf("sqlite.go:84: %s", hex.EncodeToString(obj.Hash[:]))
     if _, err = db.Exec(`
     insert into objects (hash, path, size, content) values (?, ?, ?, ?);
     `, hex.EncodeToString(obj.Hash[:]), obj.Path, obj.Size, obj.Content); err != nil {

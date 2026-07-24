@@ -1,7 +1,6 @@
 package main 
 
 import (
-	"crypto/sha1"
 	//"encoding/hex"
 	"fmt"
 	"os"
@@ -10,15 +9,6 @@ import (
     types "github.com/Clorter/go-git/types"
 )
 
-
-func newObject(filepath_ string) *types.Object {
-	content, err := os.ReadFile(filepath_)
-	if err != nil {
-		panic(err)
-	}
-    obj := types.Object{sha1.Sum([]byte(content)), filepath_, 42, string(content)}
-	return &obj
-}
 
 func Add(filepath_ string) {
     // ====== An object instance creation ======
@@ -29,10 +19,10 @@ func Add(filepath_ string) {
 	if _, err := os.Stat(absPath); err != nil {
 		panic(fmt.Sprintf("file %s does not exist\n", absPath))
 	}
-	obj := newObject(absPath)
+	obj := types.NewObject(absPath)
 
     // ====== Store the object ================
-    writer.Add(*obj)
+    writer.Add(obj)
     obj1 := writer.Get()
     fmt.Println(obj1)
 }
