@@ -83,15 +83,18 @@ func new_commit_objects(commit_hash [20]byte) {
 	commit_objects_instance := types.Commit_objects{commit_hash, index_bytes}
 
     f, err := os.Create(filepath.Join(gogit, "commits-objects", hex.EncodeToString(commit_hash[:])))
-    defer f.Close()
     if err != nil {
        panic(err)
     }
+    defer f.Close()
     f.Write([]byte(commit_objects_instance.Objects))
 }
+
 func (ds Disk_storage) Commit(message string){
 	commit_hash := sha1.Sum([]byte(message))
 	commit := types.Commit{commit_hash, "author", "email", message}
+	new_commit_objects(commit_hash)
+
     dotgogit := SearchGit()
 	f, err := os.Create(filepath.Join(dotgogit, "commits", hex.EncodeToString(commit.Hash[:]))) 
 	if err != nil {
@@ -99,5 +102,4 @@ func (ds Disk_storage) Commit(message string){
 	}
 	f.Write([]byte(commit.Message))
 	f.Close()
-	new_commit_objects(commit_hash)
 }

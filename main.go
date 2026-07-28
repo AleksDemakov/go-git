@@ -27,7 +27,7 @@ func ReadArg(command string, arg string) {
 
 func main() {
 
-    writer = storage.Disk_storage{}
+    writer = storage.Database_storage{}
 
 	command := os.Args[1] 
 

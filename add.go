@@ -23,6 +23,4 @@ func Add(filepath_ string) {
 
     // ====== Store the object ================
     writer.Add(obj)
-    obj1 := writer.Get()
-    fmt.Println(obj1)
 }
