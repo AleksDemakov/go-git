@@ -12,7 +12,8 @@ import (
 
 type Disk_storage struct{}
 
-func SearchGit() string {
+// searchRepoMeta returns absolute path to meta file or directory including file or dir itself
+func (ds Disk_storage) searchRepoMeta() string {
 	absPath, err := os.Getwd()
 	if err != nil {
 		panic(err)
@@ -48,7 +49,7 @@ func (ds Disk_storage) Init(){
 }
 
 func (ds Disk_storage) Add(obj types.Object){
-    dotgogit := SearchGit()
+    dotgogit := ds.searchRepoMeta()
 	objects_file, err := os.Create(filepath.Join(dotgogit, "objects", hex.EncodeToString(obj.Hash[:]))) // hex.EncodeToString(obj.hash[:])  instead of obj.hash
 	if err != nil {
 		panic(err)
@@ -71,8 +72,8 @@ func (ds Disk_storage) Get() types.Object{
     return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
 }
 
-func new_commit_objects(commit_hash [20]byte) {
-	gogit := SearchGit()
+func (ds Disk_storage) new_commit_objects(commit_hash [20]byte) {
+	gogit := ds.searchRepoMeta()
 
     // read Index for staged files to include in the commit
 	index_bytes, err := os.ReadFile(filepath.Join(gogit, "index"))
@@ -93,9 +94,9 @@ func new_commit_objects(commit_hash [20]byte) {
 func (ds Disk_storage) Commit(message string){
 	commit_hash := sha1.Sum([]byte(message))
 	commit := types.Commit{commit_hash, "author", "email", message}
-	new_commit_objects(commit_hash)
+	ds.new_commit_objects(commit_hash)
 
-    dotgogit := SearchGit()
+    dotgogit := ds.searchRepoMeta()
 	f, err := os.Create(filepath.Join(dotgogit, "commits", hex.EncodeToString(commit.Hash[:]))) 
 	if err != nil {
 		panic(err)
@@ -103,3 +104,8 @@ func (ds Disk_storage) Commit(message string){
 	f.Write([]byte(commit.Message))
 	f.Close()
 }
+
+func Status(){
+}
+
+//func Branch(){}

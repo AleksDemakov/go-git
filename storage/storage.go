@@ -9,5 +9,6 @@ type Storage interface{
     Add(types.Object)
     Get() types.Object
     Commit(string)
+	Status() []types.Object
 }
 
