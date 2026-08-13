@@ -10,7 +10,6 @@ import (
 
 
 func ReadArg(command string, arg string) {
-	fmt.Println("MAIN:", command )
 	if command == "add" {
 		core.Add(arg) // arg is a file name
 	} else if command == "commit" {
@@ -21,7 +20,9 @@ func ReadArg(command string, arg string) {
         core.Init()
 	} else if command == "status"{
 		core.Status()
-	}else{
+	} else if command == "branch" {
+		core.Branch()
+	} else{
         // TODO: print help here
 		fmt.Println("Failed command")
 	}

@@ -15,8 +15,8 @@ import (
 type Database_storage struct{
 }
 
-// searchRepoMeta returns absolute path to meta file or directory including file or dir itself
-func (ds Database_storage) searchRepoMeta() string{
+// SearchRepoMeta returns absolute path to meta file or directory including file or dir itself
+func (ds Database_storage) SearchRepoMeta() string{
 	absPath, err := os.Getwd()
 	if err != nil {
 		panic(err)
@@ -69,10 +69,16 @@ create table refs(
 	name text,
 	commit_hash text
 );
+create table head(
+	name text
+);
     `) ; err != nil {
         panic(err)
     }
 	if _, err = db.Exec(`insert into refs (name, commit_hash) values ("main", NULL)`) ; err != nil {
+		panic(err)
+	}
+	if _, err = db.Exec(`insert into head values ("main")`) ; err != nil {
 		panic(err)
 	}
 }
@@ -92,7 +98,8 @@ func getObjectFromRows(rows *sql.Rows) types.Object{
 }
 
 func (ds Database_storage) FilesAll() []types.Object{
-    db, err := sql.Open("sqlite", "sqlite.db")
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
     if err != nil {
         panic(err)
     }
@@ -116,7 +123,8 @@ func (ds Database_storage) Get() types.Object {
 }
 
 func (ds Database_storage) Add(obj types.Object){
-    db, err := sql.Open("sqlite", "sqlite.db")
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
     if err != nil {
         panic(err)
     }
@@ -133,10 +141,8 @@ func (ds Database_storage) Add(obj types.Object){
 	}
 }
 
-// Status returns array of 
 func (ds Database_storage) Status() []types.Object {
-	repometa := ds.searchRepoMeta()
-	fmt.Println(repometa)
+	repometa := ds.SearchRepoMeta()
     db, err := sql.Open("sqlite", repometa)
     if err != nil {
         panic(err)
@@ -144,7 +150,7 @@ func (ds Database_storage) Status() []types.Object {
 	defer db.Close()
 	// get objects from index
 	rows, err := db.Query("select objects.hash, objects.path, objects.size, objects.content from _index LEFT JOIN objects on _index.hash == objects.hash")
-	if err != nil{
+	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
@@ -159,7 +165,8 @@ func (ds Database_storage) Status() []types.Object {
 }
 
 func (ds Database_storage) Commit(message string) {
-    db, err := sql.Open("sqlite", "sqlite.db")
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
     if err != nil {
         panic(err)
     }
@@ -184,17 +191,54 @@ func (ds Database_storage) Commit(message string) {
         panic(err)
     }
 
-	// move ref 
+	// Move refs
     if _, err = db.Exec(`
     update refs set commit_hash = ? where name = "main";
     `, commitHashString); err != nil {
         panic(err)
     }
 
-	// Clear index
-    if _, err = db.Exec(`delete from _index;`); err != nil {
-        panic(err)
-    }
+	// to Clear index or to not clear?
+    //if _, err = db.Exec(`delete from _index;`); err != nil {
+        //panic(err)
+    //}
 }
 
-//func (ds Database_storage) Branch(){}
+func (ds Database_storage) Branch() ([]string, string) {
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
+	rows, err := db.Query("select name from refs;")
+	if err != nil{
+		panic(err)
+	}
+	var branches []string
+	for rows.Next(){
+		var name string 
+		rows.Scan(&name)
+		branches = append(branches, name)
+	}
+	row, err := db.Query("select name from head;")
+	if err != nil{
+		panic(err)
+	}
+	var curBranch string
+	for row.Next(){
+		row.Scan(&curBranch)
+	}
+	return branches, curBranch
+}
+
+func (ds Database_storage) Restore(isIndex bool, source string, filname string) types.object {
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
+	if isIndex {
+		// restore file in index from a source commit 
+		rows, err := db.Query("select hash, size, path, content from objects where 
+		()")
+		if err != nil{
+			panic(err)
+		}
+	} else {
+		// restore file in working tree from the index	
+	}
+}

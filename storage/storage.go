@@ -10,5 +10,7 @@ type Storage interface{
     Get() types.Object
     Commit(string)
 	Status() []types.Object
+	Branch() ([]string, string)
+	SearchRepoMeta() string
 }
 
