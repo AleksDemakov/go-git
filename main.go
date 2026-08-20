@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"flag"
 	//"path/filepath"
 	core "github.com/Clorter/go-git/core"
 )
@@ -29,12 +30,23 @@ func ReadArg(command string, arg string) {
 }
 
 func main() {
+	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+	stagedFlag := restoreCmd.Bool("staged" , false, "where to restore")
 
 	command := os.Args[1] 
-    var NameFile string
-    if len(os.Args) > 2 {
-        NameFile = os.Args[2]
-    }
-	ReadArg(command, NameFile)
+	switch command {
+	//TODO: file validation
+	case "restore" :
+		restoreCmd.Parse(os.Args[2:])
+		fmt.Println(*stagedFlag)
+		fmt.Println(restoreCmd.Args())
+		core.Restore(*stagedFlag, restoreCmd.Args()[0])
+	default: 
+		var NameFile string
+		if len(os.Args) > 2 {
+			NameFile = os.Args[2]
+		}
+		ReadArg(command, NameFile)
+	}
 
 }

@@ -93,7 +93,8 @@ func (ds Disk_storage) new_commit_objects(commit_hash [20]byte) {
 
 func (ds Disk_storage) Commit(message string){
 	commit_hash := sha1.Sum([]byte(message))
-	commit := types.Commit{commit_hash, "author", "email", message}
+	// TODO: insert parentHash as second argument! 
+	commit := types.Commit{commit_hash, commit_hash, "author", "email", message, "01-01-2026 00:00:00"}
 	ds.new_commit_objects(commit_hash)
 
     dotgogit := ds.SearchRepoMeta()

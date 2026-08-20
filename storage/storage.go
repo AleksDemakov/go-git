@@ -12,5 +12,8 @@ type Storage interface{
 	Status() []types.Object
 	Branch() ([]string, string)
 	SearchRepoMeta() string
+	Restore(bool, string, string) types.Object
+	GetObjectsFromCommits(int) []types.Object
+	Log(int) []types.Commit
 }
 

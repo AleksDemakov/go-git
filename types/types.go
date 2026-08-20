@@ -7,9 +7,11 @@ import (
 
 type Commit struct {
 	Hash    [20]byte
+	ParentHash [20]byte
 	Author  string
 	Email   string
 	Message string
+	Date string
 }
 
 // a link struct between commits and commited files
