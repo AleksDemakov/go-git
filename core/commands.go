@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	//"strings"
+	"io/fs"
+	"strings"
 
     types "github.com/Clorter/go-git/types"
     storage "github.com/Clorter/go-git/storage"
@@ -23,6 +24,7 @@ func Commit(message string) {
     adapter.Commit(message)
 }
 
+// TODO: add Rename type of change (move is equal rename)
 func Add(filepath_ string) {
     // ====== An object instance creation ======
 	workingDir, _ := os.Getwd()
@@ -55,9 +57,9 @@ func workingTreeObjectsRecursion(objects *[]types.Object, dir string) *[]types.O
         panic(err) 
     }
     for _, e := range entries {
-		if e.Name()[0] == '.'{
+		if e.IsDir() &&  e.Name()[0] == '.' {
 			continue
-		}	
+		}
 		filename := filepath.Join(dir, e.Name())
 		if e.IsDir() {
 			workingTreeObjectsRecursion(objects, filename)
@@ -68,6 +70,7 @@ func workingTreeObjectsRecursion(objects *[]types.Object, dir string) *[]types.O
 	return objects
 }
 
+// TODO: abstract these 3 functions
 func findObjectInSliceByPath(obj types.Object, slice []types.Object) int {
 	for index, entry := range(slice) {
 		if obj.Path == entry.Path {
@@ -84,14 +87,34 @@ func findObjectInSliceByHash(obj types.Object, slice []types.Object) int {
 	}
 	return  -1
 }
+func findObjectInSliceByPathSuffix(path string, slice []types.Object) int {
+	for index, entry := range(slice) {
+		if strings.HasSuffix(entry.Path, path) {
+			return index
+		}
+	}
+	return  -1
+}
 
+func getUntrackedObjects() []types.Object {
+	index := adapter.Index() // list of types.Object
+	repoPath := filepath.Dir(adapter.SearchRepoMeta())
+	workingTreeObjects := getWorkingTreeObjects(repoPath)
+	var objectsNotInIndex []types.Object
+	for _, object := range workingTreeObjects{
+		if id := findObjectInSliceByPath(object, index); id ==  -1{
+			objectsNotInIndex = append(objectsNotInIndex, object)
+		}
+	}
+	return objectsNotInIndex
+}
 // TODO: refactor and write comments
 func Status() {
 	
 	_, curBranch := adapter.Branch()
 	fmt.Println("On branch ", curBranch)
 
-	index := adapter.Status() // list of types.Object
+	index := adapter.Index() // list of types.Object
 	if len(index) == 0 {
 		fmt.Println("Nothing to commit")
 		return 
@@ -129,14 +152,8 @@ func Status() {
 		}
 	}
 
-	var objectsNotInIndex []types.Object
-	for _, object := range workingTreeObjects{
-		if id := findObjectInSliceByPath(object, index); id ==  -1{
-			objectsNotInIndex = append(objectsNotInIndex, object)
-		}
-	}
-
-	if len(objectsNotInIndex) >0 {
+	objectsNotInIndex := getUntrackedObjects()
+	if len(objectsNotInIndex) > 0 {
 		fmt.Println()
 		fmt.Println("Untracked files:")
 		fmt.Println("   (use \"git add <file>...\" to include in what will be committed)")	
@@ -146,7 +163,59 @@ func Status() {
 	}
 }
 
-func Branch() {
+// TODO: name equals commit hash case. also in table head should be possible to use commit hash as a name 
+// TODO: working tree validation for unsaved items 
+func Checkout(name string) {
+	adapter.MoveHeadTo(name)
+	adapter.MoveIndexTo(name)
+	objects := adapter.GetObjectsFromCommits(1)	
+	workingDir, _ := os.Getwd()
+
+	untrackedObjects := getUntrackedObjects()
+
+	// 1. delete all files except untracked
+	err := filepath.Walk(workingDir, func(path string, info fs.FileInfo, err error) error {
+		relPath, _ := filepath.Rel(workingDir, path)
+		if err != nil {
+			fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", relPath, err)
+			return err
+		}
+		if info.IsDir() {
+			if info.Name()[0] == '.' {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if findObjectInSliceByPathSuffix(relPath, untrackedObjects) != -1 {
+			return nil 
+		}
+		fmt.Printf("walking the path :%q\n", relPath)
+		if err = os.Remove(path); err != nil {panic(err)}
+		return nil
+	})
+	if err != nil {panic(err)}	
+	// 2. recreate all files from <name> branch 
+	for _, object := range objects {
+		if filepath.Dir(object.Path)!="." {
+			if err = os.Mkdir(filepath.Dir(object.Path), 0777); err != nil {
+				panic(err)
+			}
+		}
+		file, err := os.Create(filepath.Base(object.Path))
+		defer file.Close()
+		if err != nil {panic(err)}
+		file.WriteString(object.Content)
+	}
+}
+
+func Branch(name string, isDelete bool) {
+	if isDelete && name != "main"{
+		adapter.DeleteBranch(name)
+	}
+	if !isDelete && name != "" {
+		adapter.NewBranch(name)
+	}	
 	branches, curBranch := adapter.Branch()
 	for _, branch := range(branches){
 		if curBranch == branch{

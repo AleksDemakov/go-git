@@ -9,11 +9,15 @@ type Storage interface{
     Add(types.Object)
     Get() types.Object
     Commit(string)
-	Status() []types.Object
+	Index() []types.Object
 	Branch() ([]string, string)
+	NewBranch(string)
+	DeleteBranch(string)
 	SearchRepoMeta() string
 	Restore(bool, string, string) types.Object
 	GetObjectsFromCommits(int) []types.Object
 	Log(int) []types.Commit
+	MoveHeadTo(string)
+	MoveIndexTo(string)
 }
 

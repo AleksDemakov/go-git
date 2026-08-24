@@ -106,6 +106,6 @@ func (ds Disk_storage) Commit(message string){
 	f.Close()
 }
 
-func Status(){}
+func Index(){}
 
 func Branch()([] string, string){return []string{}, ""}

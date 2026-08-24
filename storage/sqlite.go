@@ -15,7 +15,18 @@ import (
 type Database_storage struct{
 }
 
-// SearchRepoMeta returns absolute path to meta file or directory including file or dir itself
+func (ds Database_storage) openConnection() (*sql.DB, error) {
+	repometa := ds.SearchRepoMeta()
+    db, err := sql.Open("sqlite", repometa)
+    if err != nil {
+        panic(err)
+    }
+	return db, err
+}
+func (ds Database_storage) closeConnection (db *sql.DB) {
+	db.Close()
+}
+// SearchRepoMeta returns absolute path to meta file or directory including file or dir itself including "sqlite.db"
 func (ds Database_storage) SearchRepoMeta() string{
 	absPath, err := os.Getwd()
 	if err != nil {
@@ -59,7 +70,7 @@ create table commits(
 	message text,
 	date text
     ) without rowid;
-create table commit_objects(
+create table commit_object(
     commit_hash text, 
     object_hash text  
     );
@@ -67,7 +78,7 @@ create table _index(
 	hash text primary key
 	) without rowid;
 create table refs(
-	name text,
+	name text primary key,
 	commit_hash text
 );
 create table head(
@@ -76,10 +87,15 @@ create table head(
     `) ; err != nil {
         panic(err)
     }
-	if _, err = db.Exec(`insert into refs (name, commit_hash) values ("main", NULL)`) ; err != nil {
+	if _, err = db.Exec(`
+	INSERT INTO refs 
+				(name, commit_hash) 
+	VALUES 		("main", NULL);`) ; err != nil {
 		panic(err)
 	}
-	if _, err = db.Exec(`insert into head values ("main")`) ; err != nil {
+	if _, err = db.Exec(`
+	INSERT INTO head 
+	VALUES 		("main");`) ; err != nil {
 		panic(err)
 	}
 }
@@ -106,7 +122,13 @@ func getCommitFromRows(rows *sql.Rows) types.Commit {
 	var parentHashNullable sql.NullString
 	var hash string
 	// TODO: convert date from string into smt?
-	if err := rows.Scan(&hash, &parentHashNullable, &commit.Author, &commit.Email, &commit.Message, &commit.Date); err != nil {
+	if err := rows.Scan(
+		&hash, 
+		&parentHashNullable, 
+		&commit.Author, 
+		&commit.Email, 
+		&commit.Message, 
+		&commit.Date ); err != nil {
 		panic(err)
 	}
 	var parentHash string
@@ -119,22 +141,18 @@ func getCommitFromRows(rows *sql.Rows) types.Commit {
 	copy(commit.Hash[:], hashSlice)
 	hashSlice1, _ := hex.DecodeString(parentHash) 
 	copy(commit.ParentHash[:], hashSlice1)
-	
 	return commit 
 }
 
 func (ds Database_storage) FilesAll() []types.Object{
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
-    rows, err := db.Query("select hash, path, size, content from objects;")
-    if err != nil {
-		panic(err)
-    }
+    rows, err := db.Query(`
+	SELECT hash, path, size, content 
+	FROM object;
+	`)
+    if err != nil {panic(err)}
 	defer rows.Close()
 
 	var files []types.Object
@@ -149,40 +167,52 @@ func (ds Database_storage) Get() types.Object {
 }
 
 func (ds Database_storage) Add(obj types.Object){
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
+	repometa := ds.SearchRepoMeta()
 	relPath, _ := filepath.Rel(filepath.Dir(repometa), obj.Path)
     if _, err = db.Exec(`
-    insert into objects (hash, path, size, content) values (?, ?, ?, ?);
-    `, hex.EncodeToString(obj.Hash[:]), relPath, obj.Size, obj.Content); err != nil {
+    INSERT INTO objects 
+				(hash, path, size, content) 
+	VALUES 		(?, ?, ?, ?);`, hex.EncodeToString(obj.Hash[:]), relPath, obj.Size, obj.Content); err != nil {
         panic(err)
     }
 	q := `
-	update _index set hash = ? where hash = (select _index.hash from _index inner join objects on objects.path = ? and _index.hash = objects.hash);
+	UPDATE _index 
+	SET	   hash = ? 
+	WHERE  hash = 
+	(SELECT _index.hash 
+	FROM  	_index 
+	INNER JOIN objects
+	ON 	objects.path = ? 
+	AND _index.hash = objects.hash);
 	`
 	if _, err = db.Exec(q, hex.EncodeToString(obj.Hash[:]), relPath) ; err != nil {
 		panic(err)
 	}
-	q1 := `	insert into _index (hash) values (?) on conflict (hash) do nothing;	`
+	q1 := `
+	INSERT INTO _index 
+				(hash) 
+	VALUES 		(?) 
+	ON CONFLICT (hash) 
+	DO NOTHING;	`
 	if _, err = db.Exec(q1, hex.EncodeToString(obj.Hash[:])) ; err != nil {
 		panic(err)
 	}
 }
 
-// TODO: rename to Index? because is is just returns index
-func (ds Database_storage) Status() []types.Object {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-	if err != nil {panic(err)}
-	defer db.Close()
+func (ds Database_storage) Index() []types.Object {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
 	// get objects from index
-	rows, err := db.Query("select objects.hash, objects.path, objects.size, objects.content from _index INNER JOIN objects on _index.hash = objects.hash;")
+	rows, err := db.Query(`
+	SELECT  	obj.hash, obj.path, obj.size, obj.content 
+	FROM		_index 
+	INNER JOIN  objects AS obj 
+	ON 			_index.hash = obj.hash;
+	`)
 	if err != nil {panic(err)}
 	defer rows.Close()
 
@@ -196,12 +226,14 @@ func (ds Database_storage) Status() []types.Object {
 
 // TODO: actualy use limit. Now it returns only 1 commit
 func (ds Database_storage) Log(limit int) []types.Commit {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-	if err != nil {panic(err)}
-	defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
-	rows, err := db.Query("select hash, parent_hash, author, email, message, date from commits where hash = (select commit_hash from head inner join refs on head.name = refs.name);")
+	rows, err := db.Query(`
+	SELECT hash, parent_hash, author, email, message, date 
+	FROM   commits
+	WHERE  hash = 
+	(SELECT commit_hash FROM head INNER JOIN refs ON head.name = refs.name);`)
 	if err != nil {
 		panic(err)
 	}
@@ -222,12 +254,15 @@ func (ds Database_storage) Log(limit int) []types.Commit {
 
 // TODO: actualy use limit. Now it returns only 1 set 
 func (ds Database_storage) GetObjectsFromCommits(limit int) []types.Object {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-	if err != nil {panic(err)}
-	defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
-	rows, err := db.Query("SELECT objects.hash, objects.path, objects.size, objects.content FROM commit_objects INNER JOIN objects ON commit_objects.object_hash = objects.hash and commit_objects.commit_hash =  (select commit_hash from head inner join refs on head.name = refs.name);")
+	rows, err := db.Query(`
+	SELECT objects.hash, objects.path, objects.size, objects.content 
+	FROM   commit_object INNER JOIN objects
+	ON	   commit_object.object_hash = objects.hash AND commit_object.commit_hash = 
+	(SELECT commit_hash 
+	FROM   head INNER JOIN refs ON head.name = refs.name);`)
 	if err != nil {
 		panic(err)
 	}
@@ -240,12 +275,8 @@ func (ds Database_storage) GetObjectsFromCommits(limit int) []types.Object {
 }
 
 func (ds Database_storage) Commit(message string) {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-    if err != nil {
-        panic(err)
-    }
-	defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
 	parent := ds.Log(1)
 	var parentHash string
@@ -255,7 +286,7 @@ func (ds Database_storage) Commit(message string) {
 		parentHash = hex.EncodeToString(parent[0].Hash[:])
 	}
 
-	index := ds.Status()
+	index := ds.Index()
 	var mergedObjectsHash string
 	for _, object := range index {
 		mergedObjectsHash += hex.EncodeToString(object.Hash[:])
@@ -269,7 +300,7 @@ func (ds Database_storage) Commit(message string) {
 	for _, file := range index {
 		// Insert row about commited files in link table
 		if _, err = db.Exec(`
-		insert into commit_objects (commit_hash, object_hash) values (?, ?);
+		INSERT INTO commit_object (commit_hash, object_hash) VALUES (?, ?);
 		`, commitHashString, hex.EncodeToString(file.Hash[:])); err != nil {
 			panic(err)
 		}
@@ -278,41 +309,93 @@ func (ds Database_storage) Commit(message string) {
 	
 	// Insert commit row in Commit table
     if _, err = db.Exec(`
-    insert into commits (hash, parent_hash, author, email, message, date) values (?,(select commit_hash from refs where name = "main"), ?, ?, ?, datetime("now"));
+    INSERT INTO commits (hash, parent_hash, author, email, message, date) 
+	VALUES 				(?,(select commit_hash from refs where name = "main"), ?, ?, ?, datetime("now"));
     `, commitHashString, "me", "me@mail.com", message); err != nil {
         panic(err)
     }
 
 	// Move refs
     if _, err = db.Exec(`
-    update refs set commit_hash = ? where name = "main";
+    UPDATE 	refs 
+	SET 	commit_hash = ? 
+	WHERE   name = "main";
     `, commitHashString); err != nil {
         panic(err)
     }
 
-	// to Clear index or to not clear?
-    //if _, err = db.Exec(`delete from _index;`); err != nil {
-        //panic(err)
-    //}
+}
+
+func (ds Database_storage) MoveHeadTo(name string){
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+    if err != nil {panic(err)}
+	if _, err := db.Exec(`
+	UPDATE head
+	SET name = ?;
+	`, name); err != nil {
+		panic(err)
+	}
+}
+// TODO: validation for unsaved items 
+func (ds Database_storage) MoveIndexTo(name string) {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+    if err != nil {panic(err)}
+	
+	if _, err := db.Exec(`
+	DROP TABLE _index;
+	CREATE TABLE _index(
+		hash text primary key
+	) without rowid;
+
+
+	INSERT INTO _index (hash)
+	-- get all object hashes from <name> branch and insert in _index table
+	SELECT objects.hash
+	FROM   commit_object INNER JOIN objects
+	ON	   commit_object.object_hash = objects.hash AND commit_object.commit_hash = 
+	(SELECT commit_hash 
+	FROM   refs 
+	WHERE name = ?);`, name); err != nil {
+		panic(err)
+	}
+}
+func (ds Database_storage) NewBranch(name string){
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+    if err != nil {panic(err)}
+	if _, err := db.Exec(`
+	INSERT INTO refs (name, commit_hash)
+	VALUES (?, (select refs.commit_hash from head inner join refs on head.name = refs.name));
+	`, name); err != nil {
+		panic(err)
+	}
+}
+
+func (ds Database_storage) DeleteBranch(name string){
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+    if err != nil {panic(err)}
+	if _, err := db.Exec(`
+	DELETE FROM refs WHERE name = ?;`, name); err != nil {
+		panic(err)
+	}
 }
 
 func (ds Database_storage) Branch() ([]string, string) {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-	
-    defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
 
 	var branches []string
-	rows, err := db.Query("select name from refs;")
-    if err != nil {
-        panic(err) 
-	}
+	rows, err := db.Query("SELECT name FROM refs;")
+    if err != nil {panic(err)}
 	for rows.Next() {
 		var name string 
 		rows.Scan(&name)
 		branches = append(branches, name)
 	}
-	row, err := db.Query("select name from head;")
+	row, err := db.Query("SELECT name FROM head;")
 	if err != nil{
 		panic(err)
 	}
@@ -324,10 +407,9 @@ func (ds Database_storage) Branch() ([]string, string) {
 }
 
 func (ds Database_storage) Restore(staged bool, source string, filename string) types.Object {
-	repometa := ds.SearchRepoMeta()
-    db, err := sql.Open("sqlite", repometa)
-    if err != nil {panic(err)}
-    defer db.Close()
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	if err != nil {panic(err)}
 
 	var files []types.Object
 	if staged {
@@ -336,15 +418,24 @@ func (ds Database_storage) Restore(staged bool, source string, filename string) 
 		var err error
 
 		if source == "HEAD" {
-			rows, err = db.Query(`SELECT hash, size, path, content FROM  
-			objects as obj INNER JOIN commit_objects as co ON co.commit_hash = 
-			(select refs.commit_hash from head INNER JOIN refs ON head.name == refs.name) 
-			and obj.path = ?;`,
+			rows, err = db.Query(`
+			SELECT	   hash, size, path, content 
+			FROM  	   object AS obj 
+			INNER JOIN commit_object AS co 
+			ON 	       co.commit_hash = 
+			(SELECT 	refs.commit_hash 
+			FROM 		head 
+			INNER JOIN  refs 
+			ON 			head.name = refs.name) 
+			AND 		obj.path = ?;`,
 			 filename)
 		} else {
-			rows, err = db.Query(`SELECT hash, size, path, content FROM  
-			objects as obj INNER JOIN commit_objects as co ON co.commit_hash = ? 
-			and obj.path = ?;`,
+			rows, err = db.Query(`
+			SELECT   	hash, size, path, content 
+			FROM  	    object AS obj 
+			INNER JOIN  commit_object AS co 
+			ON 			co.commit_hash = ? 
+			AND 		obj.path = ?;`,
 			source,  filename)
 		}
 		if err != nil{panic(err)}
@@ -352,13 +443,21 @@ func (ds Database_storage) Restore(staged bool, source string, filename string) 
 			obj := getObjectFromRows(rows)
 			files = append(files, obj)
 		}
-		if _, err = db.Exec(`update _index set hash = ? where hash = 
-		(select _index.hash from _index inner join objects on _index.hash = objects.hash and objects.path = ? );`,hex.EncodeToString(files[0].Hash[:]), filename ) ; err != nil {
+		if _, err = db.Exec(`
+		UPDATE   _index 
+		SET		 hash = ? 
+		WHERE 	 hash = 
+		(SELECT _index.hash 
+		FROM _index INNER JOIN object
+		ON _index.hash = object.hash AND object.path = ? );`,hex.EncodeToString(files[0].Hash[:]), filename ) ; err != nil {
 			panic(err)
 		}
 	} else {
 		// restore file in working tree from the index	
-		rows, err := db.Query("select objects.hash, objects.path, objects.size, objects.content from _index INNER JOIN objects on _index.hash = objects.hash and  objects.path = ?;", filename)
+		rows, err := db.Query(`
+		SELECT object.hash, object.path, object.size, object.content 
+		FROM _index INNER JOIN objects 
+		ON _index.hash = object.hash AND object.path = ?;`, filename)
 		if err != nil {panic(err)}
 		for rows.Next() {
 			obj := getObjectFromRows(rows)

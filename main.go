@@ -18,12 +18,13 @@ func ReadArg(command string, arg string) {
 	} else if command == "push" {
 		fmt.Println("push is not implemented yet")
 	} else if command == "init" {
+		//TODO: validation
         core.Init()
 	} else if command == "status"{
 		core.Status()
-	} else if command == "branch" {
-		core.Branch()
-	} else{
+	} else if command == "checkout" {
+		core.Checkout(arg)
+	} else {
         // TODO: print help here
 		fmt.Println("Failed command")
 	}
@@ -33,14 +34,28 @@ func main() {
 	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
 	stagedFlag := restoreCmd.Bool("staged" , false, "where to restore")
 
+	branchCmd := flag.NewFlagSet("branch", flag.ExitOnError)
+	deleteBranchFlag := branchCmd.String("d", "", "name of branch to delete")
+
 	command := os.Args[1] 
 	switch command {
 	//TODO: file validation
 	case "restore" :
 		restoreCmd.Parse(os.Args[2:])
-		fmt.Println(*stagedFlag)
-		fmt.Println(restoreCmd.Args())
 		core.Restore(*stagedFlag, restoreCmd.Args()[0])
+	case "branch":
+		branchCmd.Parse(os.Args[2:])
+		if *deleteBranchFlag == "" {
+			// new branch
+			if len(branchCmd.Args()) > 0 {
+				core.Branch(branchCmd.Args()[0], false)
+			} else {
+				core.Branch("", false)
+			}
+		} else {
+			// delete branch
+			core.Branch(*deleteBranchFlag, true)
+		}
 	default: 
 		var NameFile string
 		if len(os.Args) > 2 {
