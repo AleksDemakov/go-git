@@ -37,6 +37,9 @@ func main() {
 	branchCmd := flag.NewFlagSet("branch", flag.ExitOnError)
 	deleteBranchFlag := branchCmd.String("d", "", "name of branch to delete")
 
+	mergeCmd := flag.NewFlagSet("merge", flag.ExitOnError)
+	mergeStrategyFlag := mergeCmd.String("s", "", "merge strategy")
+
 	command := os.Args[1] 
 	switch command {
 	//TODO: file validation
@@ -56,6 +59,9 @@ func main() {
 			// delete branch
 			core.Branch(*deleteBranchFlag, true)
 		}
+	case "merge":
+		mergeCmd.Parse(os.Args[2:])
+		core.Merge(mergeCmd.Args()[0], *mergeStrategyFlag)
 	default: 
 		var NameFile string
 		if len(os.Args) > 2 {

@@ -8,6 +8,7 @@ import (
 type Commit struct {
 	Hash    [20]byte
 	ParentHash [20]byte
+	Parent2Hash [20]byte
 	Author  string
 	Email   string
 	Message string
@@ -25,6 +26,7 @@ type Object struct {
 	Path    string
 	Size    int32
 	Content string
+	Flag 	string
 }
 
 func NewObject(filepath_ string) Object {
@@ -32,6 +34,6 @@ func NewObject(filepath_ string) Object {
 	if err != nil {
 		panic(err)
 	}
-    obj := Object{sha1.Sum([]byte(content)), filepath_, 42, string(content)}
+    obj := Object{sha1.Sum([]byte(content)), filepath_, 42, string(content), "CE_VALID"}
 	return obj
 }

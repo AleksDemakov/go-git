@@ -69,7 +69,7 @@ func (ds Disk_storage) Add(obj types.Object){
 
 func (ds Disk_storage) Get() types.Object{
     hash, _ := hex.DecodeString("da39a3ee5e6b4b0d3255bfef95601890afd80709")
-    return types.Object{[20]byte(hash) , "da", 64.0, "da"} 
+    return types.Object{[20]byte(hash) , "da", 64.0, "da", "CE_VALID"} 
 }
 
 func (ds Disk_storage) new_commit_objects(commit_hash [20]byte) {
@@ -94,7 +94,7 @@ func (ds Disk_storage) new_commit_objects(commit_hash [20]byte) {
 func (ds Disk_storage) Commit(message string){
 	commit_hash := sha1.Sum([]byte(message))
 	// TODO: insert parentHash as second argument! 
-	commit := types.Commit{commit_hash, commit_hash, "author", "email", message, "01-01-2026 00:00:00"}
+	commit := types.Commit{commit_hash, commit_hash, [20]byte{}, "author", "email", message, "01-01-2026 00:00:00"}
 	ds.new_commit_objects(commit_hash)
 
     dotgogit := ds.SearchRepoMeta()

@@ -14,6 +14,7 @@ func execGit(t *testing.T, cmd *exec.Cmd ) {
 	if err != nil {
 		t.Errorf("Error: %v\n", err)
 	}
+	t.Helper()
 	t.Log("running <"+cmd.String()+"> cmd: "+string(res))
 }
 

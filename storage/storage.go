@@ -15,9 +15,12 @@ type Storage interface{
 	DeleteBranch(string)
 	SearchRepoMeta() string
 	Restore(bool, string, string) types.Object
-	GetObjectsFromCommits(int) []types.Object
+	GetObjectsFromLastCommits(int) []types.Object
+	GetObjectsFromCommit(string) []types.Object
+	FindHashesForMerge(string) map[string]string
 	Log(int) []types.Commit
 	MoveHeadTo(string)
 	MoveIndexTo(string)
+	Merge(string, string, []types.Object)
 }
 

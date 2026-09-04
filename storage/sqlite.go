@@ -26,6 +26,7 @@ func (ds Database_storage) openConnection() (*sql.DB, error) {
 func (ds Database_storage) closeConnection (db *sql.DB) {
 	db.Close()
 }
+
 // SearchRepoMeta returns absolute path to meta file or directory including file or dir itself including "sqlite.db"
 func (ds Database_storage) SearchRepoMeta() string{
 	absPath, err := os.Getwd()
@@ -60,11 +61,13 @@ create table objects(
     hash text primary key, 
     path text, 
     size real, 
-    content text
+    content text,
+	flag text
     ) without rowid;
 create table commits(
     hash text primary key, 
 	parent_hash text,
+	parent2_hash text,
     author text, 
     email text,
 	message text,
@@ -120,30 +123,43 @@ func getObjectFromRows(rows *sql.Rows) types.Object {
 func getCommitFromRows(rows *sql.Rows) types.Commit {
 	var commit types.Commit
 	var parentHashNullable sql.NullString
+	//var parent2HashNullable sql.NullString
 	var hash string
 	// TODO: convert date from string into smt?
 	if err := rows.Scan(
 		&hash, 
 		&parentHashNullable, 
+	//	&parent2HashNullable, 
 		&commit.Author, 
 		&commit.Email, 
 		&commit.Message, 
 		&commit.Date ); err != nil {
 		panic(err)
 	}
+	
+	hashSlice, _ := hex.DecodeString(hash) 
+	copy(commit.Hash[:], hashSlice)
+
 	var parentHash string
 	if parentHashNullable.Valid {
 		parentHash = parentHashNullable.String 
 	}else{
 		parentHash = "" 
 	}
-	hashSlice, _ := hex.DecodeString(hash) 
-	copy(commit.Hash[:], hashSlice)
 	hashSlice1, _ := hex.DecodeString(parentHash) 
 	copy(commit.ParentHash[:], hashSlice1)
+
+//	if parent2HashNullable.Valid {
+//		parentHash = parent2HashNullable.String 
+//	}else{
+//		parentHash = "" 
+//	}
+//	hashSlice1, _ = hex.DecodeString(parentHash) 
+//	copy(commit.Parent2Hash[:], hashSlice1)
 	return commit 
 }
 
+// TODO: remove this function?
 func (ds Database_storage) FilesAll() []types.Object{
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
@@ -253,7 +269,7 @@ func (ds Database_storage) Log(limit int) []types.Commit {
 }
 
 // TODO: actualy use limit. Now it returns only 1 set 
-func (ds Database_storage) GetObjectsFromCommits(limit int) []types.Object {
+func (ds Database_storage) GetObjectsFromLastCommits(limit int) []types.Object {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 
@@ -272,6 +288,143 @@ func (ds Database_storage) GetObjectsFromCommits(limit int) []types.Object {
 		objects = append(objects, object)
 	}
 	return objects
+}
+// TODO: actually same as GetObjectsFromCommits(int). mb to abstract?
+func (ds Database_storage) GetObjectsFromCommit(commit string) []types.Object {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	rows, err := db.Query(`
+	SELECT objects.hash, objects.path, objects.size, objects.content 
+	FROM   commit_object INNER JOIN objects
+	ON	   commit_object.object_hash = objects.hash AND commit_object.commit_hash = ?;`, commit)
+	if err != nil {
+		panic(err)
+	}
+	var objects []types.Object
+	for rows.Next() {
+		object := getObjectFromRows(rows)
+		objects = append(objects, object)
+	}
+	return objects
+
+}
+
+func findObjectInSliceByPath(obj types.Object, slice []types.Object) int {
+	for index, entry := range(slice) {
+		if obj.Path == entry.Path {
+			return index
+		}
+	}
+	return  -1
+}
+
+// FindHashesForMerge returns {"base":baseHash, "theirs":theirsHash, "ours":oursHash}
+func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[string]string {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	oursHash := hex.EncodeToString(ds.Log(1)[0].Hash[:])
+	var theirsHash string 
+	rows, err := db.Query(`
+	select commit_hash from refs where name = ?;
+	`, theirsBranchName)
+	for rows.Next(){
+		if err = rows.Scan(&theirsHash);err != nil {panic(err)}
+	}
+	// find LCA (least common ancestor)
+	rows, _ = db.Query(`
+	with recursive commits_graph(hash, parent_hash) as (
+		select hash, parent_hash from commits
+	),
+ 	hit(hash, cnt) as (
+		select ?, 1
+		union all
+		select ?, 1
+		union all 
+		select commits_graph.parent_hash, hit.cnt from hit join commits_graph on hit.hash = commits_graph.hash 
+	)
+	select hit.hash as cnt from hit where hit.hash is not null group by hit.hash order by cnt desc limit 1;
+	`, oursHash, theirsHash)
+	var baseHash string 
+	for rows.Next(){
+		if err = rows.Scan(&baseHash); err != nil {panic(err)}
+	}
+	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
+}
+
+func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object){
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	// Transform the index
+	// Stop if there is a conflict
+	for _, object := range commitObjects {
+		if object.Flag == "CE_CONFLICTED" {
+			fmt.Println("Can`t merge automatically. Resolve a conflict.")
+			return 
+		}
+	}
+
+	message := fmt.Sprintf("Merge %s to %s", branchName, "HEAD")
+	hashes := ds.FindHashesForMerge(branchName)
+	//baseHash := hashes["base"]
+	theirsHash := hashes["theirs"]
+	oursHash := hashes["ours"]
+	var parent1Hash, parent2Hash string
+	parent1Hash = oursHash
+	parent2Hash = theirsHash
+	if strategy == "theirs"{
+		parent1Hash, parent2Hash = parent2Hash, parent1Hash  //swap
+	}
+	
+	var joinedObjectsHash string
+	// combine all info about objects and commit for hash calculation
+	if strategy == "ours" || strategy == "theirs" {
+		for _, object := range ds.GetObjectsFromCommit(parent1Hash){
+			joinedObjectsHash += hex.EncodeToString(object.Hash[:])
+		}
+	} else {
+		for _, object := range commitObjects{
+			joinedObjectsHash += hex.EncodeToString(object.Hash[:])
+		}
+	}
+	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, "me", "me@mail.com", message, joinedObjectsHash)
+	commitHashSum := sha1.Sum([]byte(bytesForHash))
+	commitHash := hex.EncodeToString(commitHashSum[:])
+
+	// insert objects in link table
+	if strategy == "ours" || strategy == "theirs" {
+		// copy from parent commit
+		if _, err = db.Exec(`
+		INSERT INTO commit_object (commit_hash, object_hash) 
+		SELECT 	 	?, object_hash 
+		FROM 	    commit_object 
+		WHERE 		commit_hash = ?;`, commitHash, parent1Hash); err != nil {panic(err)}
+	} else {
+		// TODO: optimize. Many requests, mb unite into transaction or smth
+		// insert objects into link table
+		for _, object := range commitObjects {
+			if _, err = db.Exec(`
+			INSERT INTO commit_object (commit_hash, object_hash) 
+			VALUES 		(?, ?);`, commitHash, hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
+		}
+	}
+
+	// Create merge commit
+	if _, err = db.Exec(`
+	INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
+	VALUES 				(?,?,  ?, ?, ?, ?, datetime("now"));
+	`, commitHash, parent1Hash, parent2Hash, "me", "me@mail.com", message); err != nil {
+		panic(err)
+	}
+	// Move refs
+	if _, err = db.Exec(`
+	UPDATE  refs
+	SET 	commit_hash = ? 
+	WHERE   name = (select name from head);
+	`, commitHash); err != nil {
+		panic(err)
+	}
+
+
 }
 
 func (ds Database_storage) Commit(message string) {
@@ -296,6 +449,7 @@ func (ds Database_storage) Commit(message string) {
 	
 	commitHash := sha1.Sum([]byte(bytesForHash))
 	commitHashString := hex.EncodeToString(commitHash[:])
+	// TODO: return commitHashString
 	fmt.Println(commitHashString)
 	for _, file := range index {
 		// Insert row about commited files in link table
@@ -306,11 +460,10 @@ func (ds Database_storage) Commit(message string) {
 		}
 	}
 	
-	
 	// Insert commit row in Commit table
     if _, err = db.Exec(`
-    INSERT INTO commits (hash, parent_hash, author, email, message, date) 
-	VALUES 				(?,(select commit_hash from refs where name = "main"), ?, ?, ?, datetime("now"));
+    INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
+	VALUES 				(?,(select refs.commit_hash from head join refs on head.name = refs.name), null, ?, ?, ?, datetime("now"));
     `, commitHashString, "me", "me@mail.com", message); err != nil {
         panic(err)
     }
@@ -319,7 +472,7 @@ func (ds Database_storage) Commit(message string) {
     if _, err = db.Exec(`
     UPDATE 	refs 
 	SET 	commit_hash = ? 
-	WHERE   name = "main";
+	WHERE   name = (select name from head);
     `, commitHashString); err != nil {
         panic(err)
     }

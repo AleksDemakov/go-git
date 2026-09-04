@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"io/fs"
 	"strings"
 
     types "github.com/Clorter/go-git/types"
@@ -119,7 +118,7 @@ func Status() {
 		fmt.Println("Nothing to commit")
 		return 
 	} 
-	lastCommitObjects := adapter.GetObjectsFromCommits(1) 
+	lastCommitObjects := adapter.GetObjectsFromLastCommits(1) 
 	repoPath := filepath.Dir(adapter.SearchRepoMeta())
 	workingTreeObjects := getWorkingTreeObjects(repoPath)
 
@@ -146,7 +145,7 @@ func Status() {
 		fmt.Println()
 		fmt.Println("Changes not stagged for commit:")
 		fmt.Println("  (use \"git add <file>\" to update what will be committed)")	
-		fmt.Println("  Not implemented -> (use \"git restore <file>...\" to discard changes in working directory)")	
+		fmt.Println("  (use \"git restore <file>...\" to discard changes in working directory)")	
 		for _, object := range objectsNotStaged{
 			fmt.Println("    " + object.Path)
 		}
@@ -168,45 +167,12 @@ func Status() {
 func Checkout(name string) {
 	adapter.MoveHeadTo(name)
 	adapter.MoveIndexTo(name)
-	objects := adapter.GetObjectsFromCommits(1)	
+
 	workingDir, _ := os.Getwd()
-
+	objects := adapter.GetObjectsFromLastCommits(1)	
 	untrackedObjects := getUntrackedObjects()
-
-	// 1. delete all files except untracked
-	err := filepath.Walk(workingDir, func(path string, info fs.FileInfo, err error) error {
-		relPath, _ := filepath.Rel(workingDir, path)
-		if err != nil {
-			fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", relPath, err)
-			return err
-		}
-		if info.IsDir() {
-			if info.Name()[0] == '.' {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if findObjectInSliceByPathSuffix(relPath, untrackedObjects) != -1 {
-			return nil 
-		}
-		fmt.Printf("walking the path :%q\n", relPath)
-		if err = os.Remove(path); err != nil {panic(err)}
-		return nil
-	})
-	if err != nil {panic(err)}	
-	// 2. recreate all files from <name> branch 
-	for _, object := range objects {
-		if filepath.Dir(object.Path)!="." {
-			if err = os.Mkdir(filepath.Dir(object.Path), 0777); err != nil {
-				panic(err)
-			}
-		}
-		file, err := os.Create(filepath.Base(object.Path))
-		defer file.Close()
-		if err != nil {panic(err)}
-		file.WriteString(object.Content)
-	}
+	workingTreeTransformer := workingTreeTransform{}
+	workingTreeTransformer.Apply(workingDir, untrackedObjects, objects)
 }
 
 func Branch(name string, isDelete bool) {
@@ -237,3 +203,4 @@ func Restore(staged bool, filename string){
 	}
 	
 }
+
