@@ -21,6 +21,7 @@ type Storage interface{
 	Log(int) []types.Commit
 	MoveHeadTo(string)
 	MoveIndexTo(string)
-	Merge(string, string, []types.Object)
+	Merge(string, string, []types.Object, []types.ConflictFile)
+
 }
 

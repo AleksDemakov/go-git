@@ -10,6 +10,27 @@ import (
 
 
 
+func printHelp() {
+	fmt.Println(`go-git - A simple git implementation
+
+Usage: go-git [--help] <command> [<args>]
+
+Commands:
+  init                    Initialize a git repository
+  add <file>             Stage a file for commit
+  commit <message>       Commit staged changes
+  push                   Push commits to remote (not implemented)
+  status                 Show working tree status
+  checkout <branch>      Switch branches
+  branch [-d <name>]     List branches, create new branch, or delete with -d
+  merge [-s <strategy>]  Merge a branch (strategy optional)
+  diff <file1> <file2> [output]  Generate conflict-style diff between files
+  restore [--staged] <file>  Restore file from HEAD
+
+Options:
+  --help, -h             Show this help message`)
+}
+
 func ReadArg(command string, arg string) {
 	if command == "add" {
 		core.Add(arg) // arg is a file name
@@ -31,6 +52,16 @@ func ReadArg(command string, arg string) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		printHelp()
+		os.Exit(0)
+	}
+
+	if os.Args[1] == "--help" || os.Args[1] == "-h" {
+		printHelp()
+		os.Exit(0)
+	}
+
 	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
 	stagedFlag := restoreCmd.Bool("staged" , false, "where to restore")
 
@@ -62,6 +93,23 @@ func main() {
 	case "merge":
 		mergeCmd.Parse(os.Args[2:])
 		core.Merge(mergeCmd.Args()[0], *mergeStrategyFlag)
+	case "diff":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: go-git diff <file1> <file2> [output]")
+			os.Exit(1)
+		}
+		var outputPath string
+		if len(os.Args) >= 5 {
+			outputPath = os.Args[4]
+		}
+		diffOutput, err := core.Diff(os.Args[2], os.Args[3], outputPath)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		if outputPath == "" {
+			fmt.Print(diffOutput)
+		}
 	default: 
 		var NameFile string
 		if len(os.Args) > 2 {

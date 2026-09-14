@@ -108,6 +108,14 @@ func getUntrackedObjects() []types.Object {
 	return objectsNotInIndex
 }
 // TODO: refactor and write comments
+// TODO: print
+//Unmerged paths:
+//  (use "git add/rm <file>..." as appropriate to mark resolution)
+//
+//    both modified:   file1.txt
+//    both modified:   file2.txt
+//    deleted by us:   file3.txt
+//    deleted by them: file4.txt
 func Status() {
 	
 	_, curBranch := adapter.Branch()
@@ -202,5 +210,31 @@ func Restore(staged bool, filename string){
 		_, err = file.WriteString(object.Content)
 	}
 	
+}
+
+// Diff generates a conflict-style diff between two files using LCS algorithm.
+// Lines only in file1 are prefixed with '+', lines only in file2 are prefixed with '-',
+// and common lines (from LCS) are written unchanged.
+// If outputPath is empty, the diff is returned as a string; otherwise written to file.
+func Diff(file1Path string, file2Path string, outputPath string) (string, error) {
+	// Read file contents
+	content1, err := os.ReadFile(file1Path)
+	if err != nil {
+		return "", err
+	}
+	content2, err := os.ReadFile(file2Path)
+	if err != nil {
+		return "", err
+	}
+
+	// Generate diff content using SimpleDiffFormat (+/- prefixes)
+	diffContent := GenerateDiff(string(content1), string(content2), SimpleDiffFormat, "", "")
+
+	if outputPath == "" {
+		return diffContent, nil
+	}
+
+	// Write to output file
+	return "", os.WriteFile(outputPath, []byte(diffContent), 0644)
 }
 

@@ -28,12 +28,13 @@ func Merge(theirsBranch string, strategy string) {
 		}else{
 			workingTreeTransformer.Apply(workingDir, untrackedObjects, theirsObjects)
 		}
-		adapter.Merge(theirsBranch, strategy, []types.Object{})
+		adapter.Merge(theirsBranch, strategy, []types.Object{}, []types.ConflictFile{})
 		return
 	}
 
 	// =========== common strategy (recursive) =============
 	var newObjects []types.Object
+	var	conflictedObjects  []types.ConflictFile
 
 	// traverse files in base commit
 	for _, baseObj := range baseObjects {
@@ -47,15 +48,21 @@ func Merge(theirsBranch string, strategy string) {
 
 			// file not changed
 			if baseObj.Hash == theirsObj.Hash && baseObj.Hash == oursObj.Hash {
+				baseObj.Flag = "CE_VALID"
 				newObjects = append(newObjects, baseObj)
 			} else if baseObj.Hash == oursObj.Hash && baseObj.Hash != theirsObj.Hash {
 				// file is changed in only in theirs
+				theirsObj.Flag = "CE_VALID"
 				newObjects = append(newObjects, theirsObj)
 			} else if baseObj.Hash == theirsObj.Hash && baseObj.Hash != oursObj.Hash {
 				// file is changed in only in ours
+				oursObj.Flag = "CE_VALID"
 				newObjects = append(newObjects, oursObj)
 			} else {
 				// file is changed in both commits. To compare line by line
+				oursObj.Flag = "CE_CONFLICTED"
+				theirsObj.Flag = "CE_CONFLICTED"
+				conflictedObjects = append(conflictedObjects, types.ConflictFile{oursObj, theirsObj, types.BothModified})
 				conflictFlag = true 
 			}
 			continue
@@ -65,6 +72,9 @@ func Merge(theirsBranch string, strategy string) {
 		if idInTheirs != -1 && idInOurs == -1 {
 			theirsObj := theirsObjects[idInTheirs]
 			if baseObj.Hash != theirsObj.Hash {
+				theirsObj.Flag = "CE_CONFLICTED"
+				// TODO: nil instead of first theirsObj
+				conflictedObjects = append(conflictedObjects, types.ConflictFile{theirsObj, theirsObj, types.OurDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
 			}
 			// file not changed but deleted in ours. Then delete
@@ -75,6 +85,9 @@ func Merge(theirsBranch string, strategy string) {
 		if idInTheirs == -1 && idInOurs != -1 {
 			oursObj := oursObjects[idInOurs]
 			if baseObj.Hash != oursObj.Hash {
+				oursObj.Flag = "CE_CONFLICTED"
+				// TODO: nil instead of second oursObj
+				conflictedObjects = append(conflictedObjects, types.ConflictFile{oursObj, oursObj, types.TheirDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
 			}
 			// file not changed but deleted in ours. Then delete
@@ -99,6 +112,9 @@ func Merge(theirsBranch string, strategy string) {
 				oursObj := oursObjects[idInOurs]
 				// different content. Conflict
 				if obj.Hash != oursObj.Hash {
+					oursObj.Flag = "CE_CONFLICTED"
+					obj.Flag = "CE_CONFLICTED"
+					conflictedObjects = append(conflictedObjects, types.ConflictFile{oursObj, obj, types.BothModified})
 					conflictFlag = true 
 				} else {
 					newObjects = append(newObjects, obj) 
@@ -124,13 +140,49 @@ func Merge(theirsBranch string, strategy string) {
 		}
 	}
 
+	workingTreeTransformer := workingTreeTransform{}
 	if conflictFlag {
-		fmt.Println("Conflict")
+
+		// Prepare files for conflict resolving with git-style markers
+
+		// add conflict files in working tree 
+		for _, conflictObject := range conflictedObjects {
+			if conflictObject.Conflict == types.BothModified {
+				// Generate conflict content with git-style markers
+				oursContent := conflictObject.Ours.Content
+				theirsContent := conflictObject.Theirs.Content
+				conflictContent := GenerateDiff(
+					oursContent,
+					theirsContent,
+					GitConflictFormat,
+					"HEAD",
+					theirsBranch,
+				)
+				// Create new object with conflict content
+				conflictObj := types.NewObjectFromContent(
+					conflictObject.Ours.Path,
+					conflictContent,
+				)
+				conflictObj.Flag = "CE_CONFLICTED"
+				newObjects = append(newObjects, conflictObj)
+				fmt.Println("CONFLICT (content): Merge conflict in", conflictObject.Ours.Path)
+			}
+			if conflictObject.Conflict == types.TheirDeleted {
+				newObjects = append(newObjects, conflictObject.Ours)
+				fmt.Println("CONFLICT (delete/modify): ",  conflictObject.Ours.Path," deleted in theirs and modified in ours." )
+			}
+			if conflictObject.Conflict == types.OurDeleted {
+				newObjects = append(newObjects, conflictObject.Theirs)
+				fmt.Println("CONFLICT (modify/delete): ", conflictObject.Ours.Path, " deleted in ours and modified in theirs." )
+			}
+		}
+		fmt.Println("Automatic merge failed; fix conflicts and then commit.")
 	} else {
-		workingTreeTransformer := workingTreeTransform{}
-		workingTreeTransformer.Apply(workingDir, untrackedObjects, newObjects)
-		adapter.Merge(theirsBranch, "common", newObjects)
+		//workingTreeTransformer.Apply(workingDir, untrackedObjects, newObjects)
 	}
+	workingTreeTransformer.Apply(workingDir, untrackedObjects, newObjects)
+	adapter.Merge(theirsBranch, "recursive", newObjects, conflictedObjects)
+
 
 	// TODO: catch move, rename.
 	// Дополнительно: Проверка на перемещения/переименования (если нужно)

@@ -332,18 +332,40 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	}
 	// find LCA (least common ancestor)
 	rows, _ = db.Query(`
-	with recursive commits_graph(hash, parent_hash) as (
-		select hash, parent_hash from commits
+	WITH RECURSIVE commits_graph(hash, parent_hash) AS (
+		SELECT hash, parent_hash FROM commits
 	),
- 	hit(hash, cnt) as (
-		select ?, 1
-		union all
-		select ?, 1
-		union all 
-		select commits_graph.parent_hash, hit.cnt from hit join commits_graph on hit.hash = commits_graph.hash 
+	hit(hash, depth) AS (
+		SELECT ?, 0  
+		UNION ALL
+		SELECT ?, 0 
+		UNION ALL
+		SELECT commits_graph.parent_hash, hit.depth + 1
+		FROM hit
+		JOIN commits_graph ON hit.hash = commits_graph.hash
+		WHERE commits_graph.parent_hash IS NOT NULL
 	)
-	select hit.hash as cnt from hit where hit.hash is not null group by hit.hash order by cnt desc limit 1;
+	SELECT hit.hash
+	FROM hit
+	WHERE hit.hash IN (
+		SELECT hash FROM hit GROUP BY hash HAVING COUNT(*) = 2  
+	)
+	ORDER BY hit.depth DESC  
+	LIMIT 1;  
 	`, oursHash, theirsHash)
+//	rows, _ = db.Query(`
+//	with recursive commits_graph(hash, parent_hash) as (
+//		select hash, parent_hash from commits
+//	),
+// 	hit(hash, cnt) as (
+//		select ?, 1
+//		union all
+//		select ?, 1
+//		union all 
+//		select commits_graph.parent_hash, hit.cnt from hit join commits_graph on hit.hash = commits_graph.hash 
+//	)
+//	select hit.hash as cnt from hit where hit.hash is not null group by hit.hash order by cnt desc limit 1;
+//	`, oursHash, theirsHash)
 	var baseHash string 
 	for rows.Next(){
 		if err = rows.Scan(&baseHash); err != nil {panic(err)}
@@ -351,16 +373,46 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
 }
 
-func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object){
+func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 	// Transform the index
-	// Stop if there is a conflict
+
+	// TODO: optimize. Many requests, mb unite into transaction or smth
+	if _, err := db.Exec(`
+	DROP TABLE _index;
+	CREATE TABLE _index(
+		hash text primary key
+	) without rowid;
+	`); err != nil {panic(err)}
+	// insert objects into index 
 	for _, object := range commitObjects {
-		if object.Flag == "CE_CONFLICTED" {
-			fmt.Println("Can`t merge automatically. Resolve a conflict.")
-			return 
+		if _, err = db.Exec(`
+		INSERT INTO _index (hash) 
+		VALUES 		(?);`,  hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
+	}
+	for _, conflictObject := range conflictedObjects {
+		if conflictObject.Conflict == types.BothModified {
+			if _, err = db.Exec(`
+			INSERT INTO _index (hash) 
+			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
 		}
+		if conflictObject.Conflict == types.TheirDeleted {
+			if _, err = db.Exec(`
+			INSERT INTO _index (hash) 
+			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+		}
+		if conflictObject.Conflict == types.OurDeleted {
+			if _, err = db.Exec(`
+			INSERT INTO _index (hash) 
+			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
+		}
+
+	}
+
+	// Stop if there is a conflict
+	if len(conflictedObjects) > 0 {
+		return
 	}
 
 	message := fmt.Sprintf("Merge %s to %s", branchName, "HEAD")
