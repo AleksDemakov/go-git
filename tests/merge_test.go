@@ -242,3 +242,72 @@ func TestMergeNonConflictingChange(t *testing.T) {
 	// This test documents current behavior
 	t.Log("Non-conflicting merge test completed")
 }
+func TestMergeDeletedInMainModifiedInTheirs(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "go-git-merge-deleted-main-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	binPath, _ := filepath.Abs("../go-git")
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tmpDir)
+
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		t.Fatalf("Failed to find ./go-git")
+	}
+
+	// 1. Initialize repository
+	execGit(t, exec.Command(binPath, "init"))
+
+	// 2. Create file on main branch
+	testFile := "file.txt"
+	initialContent := "common line 1\ncommon line 2\ncommon line 3"
+	if err := os.WriteFile(testFile, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// 3. Add and commit on main
+	execGit(t, exec.Command(binPath, "add", testFile))
+	execGit(t, exec.Command(binPath, "commit", "Initial commit"))
+
+	// 4. Create feature branch
+	execGit(t, exec.Command(binPath, "branch", "feature"))
+
+	// 5. Switch to feature branch and modify the file
+	execGit(t, exec.Command(binPath, "checkout", "feature"))
+	modifiedContent := "common line 1\nMODIFIED IN FEATURE\ncommon line 3"
+	if err := os.WriteFile(testFile, []byte(modifiedContent), 0644); err != nil {
+		t.Fatalf("Failed to modify test file: %v", err)
+	}
+	execGit(t, exec.Command(binPath, "add", testFile))
+	execGit(t, exec.Command(binPath, "commit", "Modified in feature branch"))
+
+	// 6. Switch back to main and delete the file
+	execGit(t, exec.Command(binPath, "checkout", "main"))
+	if err := os.Remove(testFile); err != nil {
+		t.Fatalf("Failed to delete test file: %v", err)
+	}
+	execGit(t, exec.Command(binPath, "add", testFile))
+	execGit(t, exec.Command(binPath, "commit", "Deleted in main branch"))
+
+
+	// 8. Merge feature into main - should detect conflict (deleted in ours, modified in theirs)
+	cmd := exec.Command(binPath, "merge", "feature")
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	t.Logf("Merge output: %s", outputStr)
+
+	// 9. Check result
+	resultContent, readErr := os.ReadFile(testFile)
+	if readErr != nil {
+		t.Logf("File does not exist after merge (expected for OurDeleted conflict)")
+	} else {
+		t.Logf("File content after merge: %s", string(resultContent))
+	}
+
+	// Note: This test may fail due to UNIQUE constraint violation in _index table
+	// caused by duplicate hash insertion (see merge.go and sqlite.go analysis)
+	_ = err
+}

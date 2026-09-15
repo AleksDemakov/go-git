@@ -73,7 +73,6 @@ func Merge(theirsBranch string, strategy string) {
 			theirsObj := theirsObjects[idInTheirs]
 			if baseObj.Hash != theirsObj.Hash {
 				theirsObj.Flag = "CE_CONFLICTED"
-				// TODO: nil instead of first theirsObj
 				conflictedObjects = append(conflictedObjects, types.ConflictFile{theirsObj, theirsObj, types.OurDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
 			}
@@ -81,12 +80,11 @@ func Merge(theirsBranch string, strategy string) {
 			continue
 		}
 
-		// Файл есть только в ours (удален в theirs)
+		// file is only in ours. Deleted in theirs 
 		if idInTheirs == -1 && idInOurs != -1 {
 			oursObj := oursObjects[idInOurs]
 			if baseObj.Hash != oursObj.Hash {
 				oursObj.Flag = "CE_CONFLICTED"
-				// TODO: nil instead of second oursObj
 				conflictedObjects = append(conflictedObjects, types.ConflictFile{oursObj, oursObj, types.TheirDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
 			}
@@ -142,9 +140,7 @@ func Merge(theirsBranch string, strategy string) {
 
 	workingTreeTransformer := workingTreeTransform{}
 	if conflictFlag {
-
 		// Prepare files for conflict resolving with git-style markers
-
 		// add conflict files in working tree 
 		for _, conflictObject := range conflictedObjects {
 			if conflictObject.Conflict == types.BothModified {

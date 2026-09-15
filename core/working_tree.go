@@ -11,8 +11,6 @@ import(
 type workingTreeTransform struct {}
 
 func (tr workingTreeTransform) Apply(rootDir string, untrackedFiles []types.Object, newObjects []types.Object){
-	fmt.Println("Working Tree apply transformation")
-	fmt.Println(newObjects)
 	// 1. delete all files except untracked
 	err := filepath.Walk(rootDir, func(path string, info fs.FileInfo, err error) error {
 		relPath, _ := filepath.Rel(rootDir, path)

@@ -178,13 +178,27 @@ func (ds Database_storage) FilesAll() []types.Object{
 	return files
 }
 
+// TODO: Remove this?
 func (ds Database_storage) Get() types.Object {
 	return ds.FilesAll()[0]
+}
+
+func (ds Database_storage) AddDeletedFile(filepath_ string) {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	
+	if _, err = db.Exec(`
+		DELETE FROM _index 
+		WHERE hash = (select hash from objects where path = ?);
+	`, filepath_); err != nil {
+		panic(err)
+	}
 }
 
 func (ds Database_storage) Add(obj types.Object){
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
+
 
 	repometa := ds.SearchRepoMeta()
 	relPath, _ := filepath.Rel(filepath.Dir(repometa), obj.Path)
@@ -255,6 +269,7 @@ func (ds Database_storage) Log(limit int) []types.Commit {
 	}
 	var commits []types.Commit
 	if !rows.Next() {
+		// TODO: check why always prints
 		fmt.Println("no rows found")
 		return commits 
 	}
@@ -373,11 +388,14 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
 }
 
+// TODO: write purpose of parameters
+// TODO: use references in conflictedFile type
 func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
-	// Transform the index
 
+
+	// Transform the index
 	// TODO: optimize. Many requests, mb unite into transaction or smth
 	if _, err := db.Exec(`
 	DROP TABLE _index;
@@ -385,27 +403,51 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 		hash text primary key
 	) without rowid;
 	`); err != nil {panic(err)}
+
 	// insert objects into index 
 	for _, object := range commitObjects {
 		if _, err = db.Exec(`
 		INSERT INTO _index (hash) 
 		VALUES 		(?);`,  hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
 	}
+	
 	for _, conflictObject := range conflictedObjects {
 		if conflictObject.Conflict == types.BothModified {
 			if _, err = db.Exec(`
 			INSERT INTO _index (hash) 
-			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			if _, err = db.Exec(`
+				UPDATE objects 
+				SET flag = 'CE_CONFLICT'
+				WHERE hash = ?;
+			`, hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+
+			if _, err = db.Exec(`
+				UPDATE objects 
+				SET flag = 'CE_CONFLICT'
+				WHERE hash = ?;
+			`, hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
+
 		}
 		if conflictObject.Conflict == types.TheirDeleted {
 			if _, err = db.Exec(`
 			INSERT INTO _index (hash) 
-			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			if _, err = db.Exec(`
+				UPDATE objects 
+				SET flag = 'CE_CONFLICT'
+				WHERE hash = ?;
+			`, hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
 		}
 		if conflictObject.Conflict == types.OurDeleted {
 			if _, err = db.Exec(`
 			INSERT INTO _index (hash) 
-			VALUES 		(?);`,  hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
+			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
+			if _, err = db.Exec(`
+				UPDATE objects 
+				SET flag = 'CE_CONFLICT'
+				WHERE hash = ?;
+			`, hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
 		}
 
 	}
@@ -479,6 +521,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 
 }
 
+//TODO: validate if all changes from workuing tree are added
 func (ds Database_storage) Commit(message string) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
@@ -502,7 +545,7 @@ func (ds Database_storage) Commit(message string) {
 	commitHash := sha1.Sum([]byte(bytesForHash))
 	commitHashString := hex.EncodeToString(commitHash[:])
 	// TODO: return commitHashString
-	fmt.Println(commitHashString)
+	// fmt.Println(commitHashString)
 	for _, file := range index {
 		// Insert row about commited files in link table
 		if _, err = db.Exec(`

@@ -7,6 +7,7 @@ import (
 type Storage interface{
     Init() 
     Add(types.Object)
+    AddDeletedFile(string)
     Get() types.Object
     Commit(string)
 	Index() []types.Object

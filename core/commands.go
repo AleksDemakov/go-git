@@ -28,9 +28,17 @@ func Add(filepath_ string) {
     // ====== An object instance creation ======
 	workingDir, _ := os.Getwd()
 	absPath := filepath.Join(workingDir, filepath_)
+	
 
 	// check if file exists
 	if _, err := os.Stat(absPath); err != nil {
+		for _, object := range adapter.Index() {
+			if object.Path == filepath_ {
+				// file was deleted
+				adapter.AddDeletedFile(filepath_)
+				return 
+			}
+		}
 		panic(fmt.Sprintf("file %s does not exist\n", absPath))
 	}
 	obj := types.NewObject(absPath)
@@ -108,7 +116,7 @@ func getUntrackedObjects() []types.Object {
 	return objectsNotInIndex
 }
 // TODO: refactor and write comments
-// TODO: print
+// TODO: print: 
 //Unmerged paths:
 //  (use "git add/rm <file>..." as appropriate to mark resolution)
 //
