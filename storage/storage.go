@@ -23,6 +23,8 @@ type Storage interface{
 	MoveHeadTo(string)
 	MoveIndexTo(string)
 	Merge(string, string, []types.Object, []types.ConflictFile)
+	isConflictState() bool
+	Rm(string)
 
 }
 

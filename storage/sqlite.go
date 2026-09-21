@@ -195,6 +195,35 @@ func (ds Database_storage) AddDeletedFile(filepath_ string) {
 	}
 }
 
+func (ds Database_storage) Rm(filepath_ string) {
+	db, err := ds.openConnection()
+	defer ds.closeConnection(db)
+	
+	// Delete file from filesystem
+	workingDir, _ := os.Getwd()
+	absPath := filepath.Join(workingDir, filepath_)
+	if err := os.Remove(absPath); err != nil {
+		panic(fmt.Sprintf("failed to remove file %s: %v", absPath, err))
+	}
+	
+	// Remove from index (stage the deletion)
+	if _, err = db.Exec(`
+		DELETE FROM _index 
+		WHERE hash = (select hash from objects where path = ?);
+	`, filepath_); err != nil {
+		panic(err)
+	}
+	
+	// Mark object as deleted
+	if _, err = db.Exec(`
+		UPDATE objects 
+		SET flag = 'CE_DELETED'
+		WHERE path = ?;
+	`, filepath_); err != nil {
+		panic(err)
+	}
+}
+
 func (ds Database_storage) Add(obj types.Object){
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
@@ -205,7 +234,9 @@ func (ds Database_storage) Add(obj types.Object){
     if _, err = db.Exec(`
     INSERT INTO objects 
 				(hash, path, size, content) 
-	VALUES 		(?, ?, ?, ?);`, hex.EncodeToString(obj.Hash[:]), relPath, obj.Size, obj.Content); err != nil {
+	VALUES 		(?, ?, ?, ?)
+	ON CONFLICT (hash)
+	DO UPDATE SET flag = 'CE_VALID';`, hex.EncodeToString(obj.Hash[:]), relPath, obj.Size, obj.Content); err != nil {
         panic(err)
     }
 	q := `
@@ -388,12 +419,41 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
 }
 
+func handleMergeConflict(branchName string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
+	
+}
+
+
 // TODO: write purpose of parameters
 // TODO: use references in conflictedFile type
 func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 
+	// Check for conflict state
+	if ds.isConflictState() {
+		rows, err := db.Query(`
+			SELECT path FROM objects
+			WHERE flag = 'CE_CONFLICT'
+		`)
+		if err != nil {
+			panic(err)
+		}
+		defer rows.Close()
+		
+		fmt.Println("You have unmerged paths.")
+		fmt.Println("(fix conflicts and run \"git commit\")")
+		fmt.Println("Unmerged paths:")
+		fmt.Println("  (use \"git add <file>...\" to mark resolution)")
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				panic(err)
+			}
+			fmt.Printf("  both modified:   %s\n", path)
+		}
+		return
+	}
 
 	// Transform the index
 	// TODO: optimize. Many requests, mb unite into transaction or smth
@@ -452,8 +512,34 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 
 	}
 
+	// TODO write handleMergeConflict function 
 	// Stop if there is a conflict
 	if len(conflictedObjects) > 0 {
+		// create conflict state table
+		if _, err = db.Exec(`
+		create table if not exists conflict(
+			merge_branch text,
+			orig_branch text,
+			commit_editmsg text
+		);
+		`) ; err != nil {
+			panic(err)
+		}
+		var origBranch string
+		err = db.QueryRow(`
+			SELECT refs.name FROM head INNER JOIN refs ON head.name = refs.name
+		`).Scan(&origBranch)
+		if err != nil {
+			panic(err)
+		}
+		defaultMsg := fmt.Sprintf("Change in %s branch", origBranch)
+		if _, err = db.Exec(`
+			INSERT INTO conflict (merge_branch, orig_branch, commit_editmsg)
+			VALUES (?, ?, ?)
+		`, branchName, origBranch, defaultMsg); err != nil {
+			panic(err)
+		}
+
 		return
 	}
 
@@ -525,6 +611,31 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 func (ds Database_storage) Commit(message string) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
+
+	// Check for conflict state
+	if ds.isConflictState() {
+		rows, err := db.Query(`
+			SELECT path FROM objects
+			WHERE flag = 'CE_CONFLICT'
+		`)
+		if err != nil {
+			panic(err)
+		}
+		defer rows.Close()
+		
+		fmt.Println("You have unmerged paths.")
+		fmt.Println("(fix conflicts and run \"git commit\")")
+		fmt.Println("Unmerged paths:")
+		fmt.Println("  (use \"git add <file>...\" to mark resolution)")
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				panic(err)
+			}
+			fmt.Printf("  both modified:   %s\n", path)
+		}
+		return
+	}
 
 	parent := ds.Log(1)
 	var parentHash string
@@ -713,4 +824,23 @@ func (ds Database_storage) Restore(staged bool, source string, filename string) 
 		}
 	}
 	return files[0]
+}
+
+func (ds Database_storage) isConflictState() bool {
+	db, err := ds.openConnection()
+	if err != nil {
+		panic(err)
+	}
+	defer ds.closeConnection(db)
+	
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*)
+		FROM _index INNER JOIN objects ON _index.hash = objects.hash
+		WHERE objects.flag = 'CE_CONFLICT'
+	`).Scan(&count)
+	if err != nil {
+		panic(err)
+	}
+	return count > 0
 }

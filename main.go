@@ -18,6 +18,7 @@ Usage: go-git [--help] <command> [<args>]
 Commands:
   init                    Initialize a git repository
   add <file>             Stage a file for commit
+  rm <file>              Remove a file from working tree and stage deletion
   commit <message>       Commit staged changes
   push                   Push commits to remote (not implemented)
   status                 Show working tree status
@@ -34,6 +35,8 @@ Options:
 func ReadArg(command string, arg string) {
 	if command == "add" {
 		core.Add(arg) // arg is a file name
+	} else if command == "rm" {
+		core.Rm(arg) // arg is a file name to remove
 	} else if command == "commit" {
         core.Commit(arg) // arg is a commit message
 	} else if command == "push" {

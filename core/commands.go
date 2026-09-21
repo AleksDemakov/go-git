@@ -32,9 +32,9 @@ func Add(filepath_ string) {
 
 	// check if file exists
 	if _, err := os.Stat(absPath); err != nil {
+		// if file was in index then commit the deletion
 		for _, object := range adapter.Index() {
 			if object.Path == filepath_ {
-				// file was deleted
 				adapter.AddDeletedFile(filepath_)
 				return 
 			}
@@ -45,6 +45,29 @@ func Add(filepath_ string) {
 
     // ====== Store the object ================
     adapter.Add(obj)
+}
+
+func Rm(filepath_ string) {
+	// Check if file exists in working directory or index
+	workingDir, _ := os.Getwd()
+	absPath := filepath.Join(workingDir, filepath_)
+	
+	// Check if file exists in working directory
+	if _, err := os.Stat(absPath); err != nil {
+		// Check if file is in index
+		fileInIndex := false
+		for _, object := range adapter.Index() {
+			if object.Path == filepath_ {
+				fileInIndex = true
+				break
+			}
+		}
+		if !fileInIndex {
+			panic(fmt.Sprintf("pathspec '%s' did not match any files", filepath_))
+		}
+	}
+	
+	adapter.Rm(filepath_)
 }
 
 // workingTreeObjects walks over all directories recursively collecting files 
