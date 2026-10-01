@@ -15,6 +15,8 @@ import (
 type Database_storage struct{
 }
 
+
+
 func (ds Database_storage) openConnection() (*sql.DB, error) {
 	repometa := ds.SearchRepoMeta()
     db, err := sql.Open("sqlite", repometa)
@@ -187,9 +189,10 @@ func (ds Database_storage) AddDeletedFile(filepath_ string) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 	
+	fmt.Println(filepath_)
 	if _, err = db.Exec(`
 		DELETE FROM _index 
-		WHERE hash = (select hash from objects where path = ?);
+		WHERE hash in (select hash from objects where path = ?);
 	`, filepath_); err != nil {
 		panic(err)
 	}
@@ -209,7 +212,7 @@ func (ds Database_storage) Rm(filepath_ string) {
 	// Remove from index (stage the deletion)
 	if _, err = db.Exec(`
 		DELETE FROM _index 
-		WHERE hash = (select hash from objects where path = ?);
+		WHERE hash in (select hash from objects where path = ?);
 	`, filepath_); err != nil {
 		panic(err)
 	}
@@ -231,6 +234,7 @@ func (ds Database_storage) Add(obj types.Object){
 
 	repometa := ds.SearchRepoMeta()
 	relPath, _ := filepath.Rel(filepath.Dir(repometa), obj.Path)
+	// add new object in objects table
     if _, err = db.Exec(`
     INSERT INTO objects 
 				(hash, path, size, content) 
@@ -239,19 +243,38 @@ func (ds Database_storage) Add(obj types.Object){
 	DO UPDATE SET flag = 'CE_VALID';`, hex.EncodeToString(obj.Hash[:]), relPath, obj.Size, obj.Content); err != nil {
         panic(err)
     }
-	q := `
-	UPDATE _index 
-	SET	   hash = ? 
-	WHERE  hash = 
-	(SELECT _index.hash 
-	FROM  	_index 
-	INNER JOIN objects
-	ON 	objects.path = ? 
-	AND _index.hash = objects.hash);
-	`
-	if _, err = db.Exec(q, hex.EncodeToString(obj.Hash[:]), relPath) ; err != nil {
+
+	if _, err = db.Exec(`
+	DELETE FROM _index
+	WHERE hash in 
+	(select _index.hash from _index join objects on objects.path=? 
+	and _index.hash = objects.hash)`, relPath); err!=nil {
 		panic(err)
 	}
+	// update CE_CONFLICT 
+	if _, err = db.Exec(`
+	UPDATE objects
+	SET 	flag = 'CE_VALID'
+	WHERE 	path = ?
+	`, relPath); err!=nil {
+		panic(err)
+//	}
+//	// mb object already in objects but new content. So update hash in index
+//	q := `
+//	UPDATE _index 
+//	SET	   hash = ? 
+//	WHERE  hash = 
+//	(SELECT _index.hash 
+//	FROM  	_index 
+//	INNER JOIN objects
+//	ON 	objects.path = ? 
+//	AND _index.hash = objects.hash);
+//	`
+//	if _, err = db.Exec(q, hex.EncodeToString(obj.Hash[:]), relPath) ; err != nil {
+		panic(err)
+	}
+
+	// add into index If completly new object
 	q1 := `
 	INSERT INTO _index 
 				(hash) 
@@ -271,7 +294,7 @@ func (ds Database_storage) Index() []types.Object {
 	rows, err := db.Query(`
 	SELECT  	obj.hash, obj.path, obj.size, obj.content 
 	FROM		_index 
-	INNER JOIN  objects AS obj 
+	JOIN  objects AS obj 
 	ON 			_index.hash = obj.hash;
 	`)
 	if err != nil {panic(err)}
@@ -363,7 +386,14 @@ func findObjectInSliceByPath(obj types.Object, slice []types.Object) int {
 	}
 	return  -1
 }
-
+func findObjectInSliceByHash(obj types.Object, slice []types.Object) int {
+	for index, entry := range(slice) {
+		if obj.Hash == entry.Hash{
+			return index
+		}
+	}
+	return  -1
+}
 // FindHashesForMerge returns {"base":baseHash, "theirs":theirsHash, "ours":oursHash}
 func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[string]string {
 	db, err := ds.openConnection()
@@ -419,19 +449,79 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
 }
 
-func handleMergeConflict(branchName string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
-	
-}
 
+// TODO: same code as merge()
+func (ds Database_storage) ContinueMerge(theirBranch string) {
+	db, err := ds.openConnection()
+	if err != nil {panic(err)}
+    defer ds.closeConnection(db)
+
+	rows, _ := db.Query(`
+		SELECT merge_branch, orig_branch, commit_editmsg
+		FROM conflict
+	`)
+	var theirHash, ourHash, message string
+	for rows.Next() {
+		if err = rows.Scan(&theirHash, &ourHash, &message); err != nil {panic(err)}
+	}
+
+	hashes := ds.FindHashesForMerge(theirBranch)
+	theirsHash := hashes["theirs"]
+	oursHash := hashes["ours"]
+	var parent1Hash, parent2Hash string
+	parent1Hash = oursHash
+	parent2Hash = theirsHash
+	var mergeResultObjects = ds.Index()
+	
+	var joinedObjectsHash string
+	// combine all info about objects and commit for hash calculation
+	for _, object := range mergeResultObjects{
+		joinedObjectsHash += hex.EncodeToString(object.Hash[:])
+	}
+	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, "me", "me@mail.com", message, joinedObjectsHash)
+	commitHashSum := sha1.Sum([]byte(bytesForHash))
+	commitHash := hex.EncodeToString(commitHashSum[:])
+
+	// insert objects in link table
+	// TODO: optimize. Many requests, mb unite into transaction or smth
+	// insert objects into link table
+	for _, object := range mergeResultObjects {
+		if _, err = db.Exec(`
+		INSERT INTO commit_object (commit_hash, object_hash) 
+		VALUES 		(?, ?);`, commitHash, hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
+	}
+	
+
+	// Create merge commit
+	if _, err = db.Exec(`
+	INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
+	VALUES 				(?,?,  ?, ?, ?, ?, datetime("now"));
+	`, commitHash, parent1Hash, parent2Hash, "me", "me@mail.com", message); err != nil {
+		panic(err)
+	}
+	// Move refs
+	if _, err = db.Exec(`
+	UPDATE  refs
+	SET 	commit_hash = ? 
+	WHERE   name = (select name from head);
+	`, commitHash); err != nil {
+		panic(err)
+	}
+
+	if _, err := db.Exec(`
+		DROP TABLE conflict;
+	`); err != nil {panic(err)}
+}
 
 // TODO: write purpose of parameters
 // TODO: use references in conflictedFile type
-func (ds Database_storage) Merge(branchName string, strategy string, commitObjects []types.Object, conflictedObjects []types.ConflictFile) {
+// mergeResultObjects is slice of non conflict objects after merging 
+func (ds Database_storage) Merge(branchName string, strategy string, mergeResultObjects []types.Object, conflictedObjects []types.ConflictFile) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 
 	// Check for conflict state
-	if ds.isConflictState() {
+	if ds.IsConflictState() {
 		rows, err := db.Query(`
 			SELECT path FROM objects
 			WHERE flag = 'CE_CONFLICT'
@@ -465,59 +555,55 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 	`); err != nil {panic(err)}
 
 	// insert objects into index 
-	for _, object := range commitObjects {
+	for _, object := range mergeResultObjects {
 		if _, err = db.Exec(`
 		INSERT INTO _index (hash) 
 		VALUES 		(?);`,  hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
 	}
+
+	// Helper functions 
+	updateFlagInObjects:= func(object *types.Object){
+		if _, err = db.Exec(`
+			UPDATE objects 
+			SET flag = ?
+			WHERE hash = ?;
+		`, object.Flag,
+			hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
+	}
+	addToIndex := func(object *types.Object){
+		if _, err = db.Exec(`
+			INSERT INTO _index (hash) 
+			VALUES 		(?) ON CONFLICT DO NOTHING;  
+		`, hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
+	}
 	
 	for _, conflictObject := range conflictedObjects {
+		addToIndex(&conflictObject.Base)
+		updateFlagInObjects(&conflictObject.Base)
 		if conflictObject.Conflict == types.BothModified {
-			if _, err = db.Exec(`
-			INSERT INTO _index (hash) 
-			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
-			if _, err = db.Exec(`
-				UPDATE objects 
-				SET flag = 'CE_CONFLICT'
-				WHERE hash = ?;
-			`, hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			addToIndex(&conflictObject.Ours)
+			addToIndex(&conflictObject.Theirs)
 
-			if _, err = db.Exec(`
-				UPDATE objects 
-				SET flag = 'CE_CONFLICT'
-				WHERE hash = ?;
-			`, hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
-
+			updateFlagInObjects(&conflictObject.Ours)
+			updateFlagInObjects(&conflictObject.Theirs)
 		}
 		if conflictObject.Conflict == types.TheirDeleted {
-			if _, err = db.Exec(`
-			INSERT INTO _index (hash) 
-			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
-			if _, err = db.Exec(`
-				UPDATE objects 
-				SET flag = 'CE_CONFLICT'
-				WHERE hash = ?;
-			`, hex.EncodeToString(conflictObject.Ours.Hash[:])); err != nil {panic(err)}
+			addToIndex(&conflictObject.Ours)
+
+			updateFlagInObjects(&conflictObject.Ours)
 		}
 		if conflictObject.Conflict == types.OurDeleted {
-			if _, err = db.Exec(`
-			INSERT INTO _index (hash) 
-			VALUES 		(?) ON CONFLICT DO NOTHING;`,  hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
-			if _, err = db.Exec(`
-				UPDATE objects 
-				SET flag = 'CE_CONFLICT'
-				WHERE hash = ?;
-			`, hex.EncodeToString(conflictObject.Theirs.Hash[:])); err != nil {panic(err)}
-		}
+			addToIndex(&conflictObject.Theirs)
 
+			updateFlagInObjects(&conflictObject.Theirs)
+		}
 	}
 
-	// TODO write handleMergeConflict function 
 	// Stop if there is a conflict
 	if len(conflictedObjects) > 0 {
 		// create conflict state table
 		if _, err = db.Exec(`
-		create table if not exists conflict(
+		CREATE table if not exists conflict(
 			merge_branch text,
 			orig_branch text,
 			commit_editmsg text
@@ -532,7 +618,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 		if err != nil {
 			panic(err)
 		}
-		defaultMsg := fmt.Sprintf("Change in %s branch", origBranch)
+		defaultMsg := fmt.Sprintf("Merge %s branch in %s", branchName, origBranch)
 		if _, err = db.Exec(`
 			INSERT INTO conflict (merge_branch, orig_branch, commit_editmsg)
 			VALUES (?, ?, ?)
@@ -562,7 +648,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 			joinedObjectsHash += hex.EncodeToString(object.Hash[:])
 		}
 	} else {
-		for _, object := range commitObjects{
+		for _, object := range mergeResultObjects{
 			joinedObjectsHash += hex.EncodeToString(object.Hash[:])
 		}
 	}
@@ -581,7 +667,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 	} else {
 		// TODO: optimize. Many requests, mb unite into transaction or smth
 		// insert objects into link table
-		for _, object := range commitObjects {
+		for _, object := range mergeResultObjects {
 			if _, err = db.Exec(`
 			INSERT INTO commit_object (commit_hash, object_hash) 
 			VALUES 		(?, ?);`, commitHash, hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
@@ -607,13 +693,13 @@ func (ds Database_storage) Merge(branchName string, strategy string, commitObjec
 
 }
 
-//TODO: validate if all changes from workuing tree are added
+//TODO: validate if all changes from working tree are added
 func (ds Database_storage) Commit(message string) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 
 	// Check for conflict state
-	if ds.isConflictState() {
+	if ds.IsConflictState() {
 		rows, err := db.Query(`
 			SELECT path FROM objects
 			WHERE flag = 'CE_CONFLICT'
@@ -826,18 +912,70 @@ func (ds Database_storage) Restore(staged bool, source string, filename string) 
 	return files[0]
 }
 
-func (ds Database_storage) isConflictState() bool {
+// True is there was a conflict but already resolved now. And ready to commit merge. Merge was not finished
+func (ds Database_storage) IsConflictResolved(conflictedObjects []types.ConflictFile) bool {
+ 	db, err := ds.openConnection()
+ 	if err != nil {
+ 		panic(err)
+ 	}
+ 	defer ds.closeConnection(db)
+    const query = `
+        SELECT EXISTS(
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'conflict' 
+        )`
+    var conflictTableExists bool
+    err = db.QueryRow(query).Scan(&conflictTableExists)
+    if err != nil {
+        return false
+    }
+
+//	index := ds.Index()
+//	var conflictSolved bool = true
+//	for _, conflictObject := range conflictedObjects {
+//		if conflictObject.Conflict == types.BothModified {
+//			// index must contain file to resolve conflict
+//			if findObjectInSliceByPath(conflictObject.Ours, index) == -1 {
+//				conflictSolved = false 
+//				break
+//			}
+//		}
+//		if conflictObject.Conflict == types.TheirDeleted {
+//			// if a file was removed from index or our version is saved 
+//			if !(findObjectInSliceByHash(conflictObject.Ours, index) == -1 &&
+//			   findObjectInSliceByHash(conflictObject.Theirs, index) == -1 || 
+//			   findObjectInSliceByPath(conflictObject.Ours, index) != -1 ) {
+//				conflictSolved = false 
+//				break 
+//			}
+//		}
+//		if conflictObject.Conflict == types.OurDeleted {
+//			// if a file was removed from index or their version is saved 
+//			if !(findObjectInSliceByHash(conflictObject.Ours, index) == -1 &&
+//			   findObjectInSliceByHash(conflictObject.Theirs, index) == -1  || 
+//			   findObjectInSliceByPath(conflictObject.Theirs, index) != -1 ){
+//				conflictSolved = false 
+//				break 
+//			}
+//		}
+//	}
+//	// Conflict resolved if conflict table exists in db (there was a conflict earlier) and 
+//	// now it is solved in index and working tree
+//	return conflictSolved && !ds.IsConflictState() &&   conflictTableExists 
+	return  !ds.IsConflictState() &&   conflictTableExists 
+}
+
+func (ds Database_storage) IsConflictState() bool {
 	db, err := ds.openConnection()
-	if err != nil {
-		panic(err)
-	}
+	if err != nil {panic(err)}
 	defer ds.closeConnection(db)
 	
 	var count int
 	err = db.QueryRow(`
 		SELECT COUNT(*)
 		FROM _index INNER JOIN objects ON _index.hash = objects.hash
-		WHERE objects.flag = 'CE_CONFLICT'
+		WHERE objects.flag LIKE 'CE_CONFLICT_%'
 	`).Scan(&count)
 	if err != nil {
 		panic(err)

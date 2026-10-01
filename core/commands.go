@@ -20,6 +20,7 @@ func Init(){
 }
 
 func Commit(message string) {
+// TODO: check IsConflictResolved and ContinueMerge. Because classic git require commit after conflicted merge
     adapter.Commit(message)
 }
 
@@ -32,9 +33,10 @@ func Add(filepath_ string) {
 
 	// check if file exists
 	if _, err := os.Stat(absPath); err != nil {
-		// if file was in index then commit the deletion
+		// if file was in index than file is removed
 		for _, object := range adapter.Index() {
 			if object.Path == filepath_ {
+				fmt.Println("mda")
 				adapter.AddDeletedFile(filepath_)
 				return 
 			}

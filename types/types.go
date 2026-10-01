@@ -37,6 +37,7 @@ const (
 )
 
 type ConflictFile struct {
+	Base 	 Object
     Ours 	 Object
     Theirs 	 Object
 	Conflict ConflictType

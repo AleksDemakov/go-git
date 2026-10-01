@@ -32,7 +32,7 @@ func (tr workingTreeTransform) Apply(rootDir string, untrackedFiles []types.Obje
 		return nil
 	})
 	if err != nil {panic(err)}	
-	// 2. recreate all files from <name> branch 
+	// 2. recreate all files from newObjects
 	for _, object := range newObjects {
 		if filepath.Dir(object.Path)!="." {
 			if err = os.Mkdir(filepath.Dir(object.Path), 0777); err != nil {
