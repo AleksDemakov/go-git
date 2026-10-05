@@ -25,8 +25,6 @@ func Merge(theirsBranch string, strategy string) {
 	oursObjects := adapter.GetObjectsFromCommit(oursHash) 
 	baseObjects := adapter.GetObjectsFromCommit(baseHash)
 
-	fmt.Println("ours objects:, ", oursObjects)
-	fmt.Println("theirs objects:, ", theirsObjects)
 
 	if strategy == "ours" || strategy == "theirs" {
 		workingTreeTransformer := workingTreeTransform{}
@@ -47,8 +45,6 @@ func Merge(theirsBranch string, strategy string) {
 	for _, baseObj := range baseObjects {
 		idInTheirs := findObjectInSliceByPath(baseObj, theirsObjects)
 		idInOurs := findObjectInSliceByPath(baseObj, oursObjects)
-		fmt.Println("id ours :, ", idInOurs)
-		fmt.Println("id theirs :, ", idInTheirs)
 
 		// file in both target commits
 		if idInTheirs != -1 && idInOurs != -1 {
@@ -57,22 +53,22 @@ func Merge(theirsBranch string, strategy string) {
 
 			// file not changed
 			if baseObj.Hash == theirsObj.Hash && baseObj.Hash == oursObj.Hash {
-				fmt.Println("file not changed")
+				//fmt.Println("file not changed")
 				baseObj.Flag = "CE_VALID"
 				mergeResultObjects = append(mergeResultObjects , baseObj)
 			} else if baseObj.Hash == oursObj.Hash && baseObj.Hash != theirsObj.Hash {
 				// file is changed in only in theirs
-				fmt.Println("file is changed in only in theirs")
+				//fmt.Println("file is changed in only in theirs")
 				theirsObj.Flag = "CE_VALID"
 				mergeResultObjects = append(mergeResultObjects, theirsObj)
 			} else if baseObj.Hash == theirsObj.Hash && baseObj.Hash != oursObj.Hash {
 				// file is changed only in ours
-				fmt.Println("file is changed only in ours")
+				//fmt.Println("file is changed only in ours")
 				oursObj.Flag = "CE_VALID"
 				mergeResultObjects = append(mergeResultObjects, oursObj)
 			} else {
 				// file is changed in both commits. need to compare line by line
-				fmt.Println("file is changed in both. need to compare line by line")
+				//fmt.Println("file is changed in both. need to compare line by line")
 				baseObj.Flag = "CE_CONFLICTED_0"
 				oursObj.Flag = "CE_CONFLICTED_1"
 				theirsObj.Flag = "CE_CONFLICTED_2"
@@ -89,7 +85,7 @@ func Merge(theirsBranch string, strategy string) {
 			if baseObj.Hash != theirsObj.Hash {
 				baseObj.Flag = "CE_CONFLICTED_0"
 				theirsObj.Flag = "CE_CONFLICTED_2"
-				fmt.Println("file is changed in theirs but deleted in ours. Conflict")
+				//fmt.Println("file is changed in theirs but deleted in ours. Conflict")
 				conflictedObjects = append(conflictedObjects, 
 					types.ConflictFile{baseObj, theirsObj, theirsObj, types.OurDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
@@ -104,7 +100,7 @@ func Merge(theirsBranch string, strategy string) {
 			if baseObj.Hash != oursObj.Hash {
 				baseObj.Flag = "CE_CONFLICTED_0"
 				oursObj.Flag = "CE_CONFLICTED"
-				fmt.Println("file is changed in ours but deleted in theris. Conflict")
+				//fmt.Println("file is changed in ours but deleted in theris. Conflict")
 				conflictedObjects = append(conflictedObjects, types.ConflictFile{baseObj, oursObj, oursObj, types.TheirDeleted})
 				conflictFlag = true // file is changed in theirs but deleted in ours. Conflict
 			}
@@ -112,7 +108,7 @@ func Merge(theirsBranch string, strategy string) {
 			continue
 		}
 		// file is deleted in both 
-		fmt.Println("file is deleted in both ")
+		//fmt.Println("file is deleted in both ")
 		if idInTheirs == -1 && idInOurs == -1 {
 			continue
 		}

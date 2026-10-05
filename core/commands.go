@@ -11,6 +11,7 @@ import (
 )
 
 // TODO: read from config
+// TODO: use types.AppConfig.AdapterType to initialize the appropriate adapter
 var adapter storage.Storage = storage.Database_storage{}
 
 
@@ -36,7 +37,6 @@ func Add(filepath_ string) {
 		// if file was in index than file is removed
 		for _, object := range adapter.Index() {
 			if object.Path == filepath_ {
-				fmt.Println("mda")
 				adapter.AddDeletedFile(filepath_)
 				return 
 			}
@@ -49,7 +49,14 @@ func Add(filepath_ string) {
     adapter.Add(obj)
 }
 
-func Rm(filepath_ string) {
+func Log(limit int, branch string){
+	commits := adapter.Log(limit, branch)
+	for _, commit := range commits {
+		fmt.Println(commit.RichString())
+	}
+}
+
+func Rm(cacheFlag bool, filepath_ string) {
 	// Check if file exists in working directory or index
 	workingDir, _ := os.Getwd()
 	absPath := filepath.Join(workingDir, filepath_)
@@ -69,7 +76,7 @@ func Rm(filepath_ string) {
 		}
 	}
 	
-	adapter.Rm(filepath_)
+	adapter.Rm(cacheFlag, filepath_)
 }
 
 // workingTreeObjects walks over all directories recursively collecting files 

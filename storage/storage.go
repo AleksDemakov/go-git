@@ -8,7 +8,6 @@ type Storage interface{
     Init() 
     Add(types.Object)
     AddDeletedFile(string)
-    Get() types.Object
     Commit(string)
 	Index() []types.Object
 	Branch() ([]string, string)
@@ -19,14 +18,14 @@ type Storage interface{
 	GetObjectsFromLastCommits(int) []types.Object
 	GetObjectsFromCommit(string) []types.Object
 	FindHashesForMerge(string) map[string]string
-	Log(int) []types.Commit
+	Log(int, string) []types.Commit
 	MoveHeadTo(string)
 	MoveIndexTo(string)
 	Merge(string, string, []types.Object, []types.ConflictFile)
 	ContinueMerge(string )
 	IsConflictState() bool
 	IsConflictResolved([]types.ConflictFile) bool
-	Rm(string)
+	Rm(bool, string)
 
 }
 

@@ -4,9 +4,6 @@ import (
 	"os" 
 	"os/exec" 
 	"testing"
-	//"fmt"
-    //types "github.com/Clorter/go-git/types"
-    //storage "github.com/Clorter/go-git/storage"
 )
 
 func execGit(t *testing.T, cmd *exec.Cmd ) {
@@ -14,6 +11,7 @@ func execGit(t *testing.T, cmd *exec.Cmd ) {
 	if err != nil {
 		t.Errorf("Error: %v\n", err)
 	}
+	// mark function as a helper, show Logs only in verbose mode
 	t.Helper()
 	t.Log("running <"+cmd.String()+"> cmd: "+string(res))
 }

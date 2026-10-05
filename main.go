@@ -27,30 +27,28 @@ Commands:
   merge [-s <strategy>]  Merge a branch (strategy optional)
   diff <file1> <file2> [output]  Generate conflict-style diff between files
   restore [--staged] <file>  Restore file from HEAD
+  log [<branch>] [-n <limit>]   Show commit log for branch (default: current branch)
 
 Options:
   --help, -h             Show this help message`)
 }
 
+// Pass one argument command
 func ReadArg(command string, arg string) {
 	if command == "add" {
 		core.Add(arg) // arg is a file name
-	} else if command == "rm" {
-		core.Rm(arg) // arg is a file name to remove
 	} else if command == "commit" {
         core.Commit(arg) // arg is a commit message
 	} else if command == "push" {
 		fmt.Println("push is not implemented yet")
 	} else if command == "init" {
-		//TODO: validation
         core.Init()
-	} else if command == "status"{
+	} else if command == "status" {
 		core.Status()
 	} else if command == "checkout" {
 		core.Checkout(arg)
 	} else {
-        // TODO: print help here
-		fmt.Println("Failed command")
+		fmt.Println("go-git: " + command + " is not a go-git command. See 'go-git --help'.")
 	}
 }
 
@@ -64,6 +62,12 @@ func main() {
 		printHelp()
 		os.Exit(0)
 	}
+
+	logCmd := flag.NewFlagSet("log", flag.ExitOnError)
+	logLimitFlag := logCmd.Int("n", -1, "Limit the output to the first <number> commits that would be shown.")
+
+	rmCmd := flag.NewFlagSet("rm", flag.ExitOnError)
+	rmCacheFlag := rmCmd.Bool("cached" , false, "rm from index")
 
 	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
 	stagedFlag := restoreCmd.Bool("staged" , false, "where to restore")
@@ -113,6 +117,16 @@ func main() {
 		if outputPath == "" {
 			fmt.Print(diffOutput)
 		}
+	case "rm":
+		rmCmd.Parse(os.Args[2:])
+		core.Rm(*rmCacheFlag, rmCmd.Args()[0])	
+	case "log":
+		logCmd.Parse(os.Args[2:])
+		var branchName string
+		if len(logCmd.Args()) > 0 {
+			branchName = logCmd.Args()[0]
+		}
+		core.Log(*logLimitFlag, branchName)
 	default: 
 		var NameFile string
 		if len(os.Args) > 2 {

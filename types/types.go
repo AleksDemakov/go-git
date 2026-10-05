@@ -2,8 +2,24 @@ package types
 
 import (
 	"os"
+	"fmt"
 	"crypto/sha1"
+	"encoding/hex"
 )
+
+// Config struct holds application configuration
+type Config struct {
+	AuthorName  string
+	AuthorEmail string
+	AdapterType string
+}
+
+// Global config instance (hardcoded for now)
+var AppConfig = Config{
+	AuthorName:  "me",
+	AuthorEmail: "me@mail.com", 
+	AdapterType: "sqlite",
+}
 
 type Commit struct {
 	Hash    [20]byte
@@ -41,6 +57,11 @@ type ConflictFile struct {
     Ours 	 Object
     Theirs 	 Object
 	Conflict ConflictType
+}
+
+func (c Commit) RichString() string {
+	return fmt.Sprintf("Commit: %s\nAuthor: %s <%s>\nDate: %s\n\t%s\n", 
+		hex.EncodeToString(c.Hash[:]), c.Author, c.Email, c.Date, c.Message)
 }
 
 func NewObject(filepath_ string) Object {

@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-
 )
 
 func TestMergeTwoBranchesOneFile(t *testing.T) {

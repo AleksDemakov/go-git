@@ -161,35 +161,11 @@ func getCommitFromRows(rows *sql.Rows) types.Commit {
 	return commit 
 }
 
-// TODO: remove this function?
-func (ds Database_storage) FilesAll() []types.Object{
-	db, err := ds.openConnection()
-    defer ds.closeConnection(db)
-
-    rows, err := db.Query(`
-	SELECT hash, path, size, content 
-	FROM object;
-	`)
-    if err != nil {panic(err)}
-	defer rows.Close()
-
-	var files []types.Object
-    for rows.Next() {
-		files = append(files, getObjectFromRows(rows))
-    }
-	return files
-}
-
-// TODO: Remove this?
-func (ds Database_storage) Get() types.Object {
-	return ds.FilesAll()[0]
-}
 
 func (ds Database_storage) AddDeletedFile(filepath_ string) {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 	
-	fmt.Println(filepath_)
 	if _, err = db.Exec(`
 		DELETE FROM _index 
 		WHERE hash in (select hash from objects where path = ?);
@@ -198,15 +174,17 @@ func (ds Database_storage) AddDeletedFile(filepath_ string) {
 	}
 }
 
-func (ds Database_storage) Rm(filepath_ string) {
+func (ds Database_storage) Rm(cachedFlag bool, filepath_ string) {
 	db, err := ds.openConnection()
 	defer ds.closeConnection(db)
 	
-	// Delete file from filesystem
-	workingDir, _ := os.Getwd()
-	absPath := filepath.Join(workingDir, filepath_)
-	if err := os.Remove(absPath); err != nil {
-		panic(fmt.Sprintf("failed to remove file %s: %v", absPath, err))
+	if !cachedFlag {
+		// Delete file from filesystem
+		workingDir, _ := os.Getwd()
+		absPath := filepath.Join(workingDir, filepath_)
+		if err := os.Remove(absPath); err != nil {
+			panic(fmt.Sprintf("failed to remove file %s: %v", absPath, err))
+		}
 	}
 	
 	// Remove from index (stage the deletion)
@@ -308,23 +286,59 @@ func (ds Database_storage) Index() []types.Object {
 	return files
 }
 
-// TODO: actualy use limit. Now it returns only 1 commit
-func (ds Database_storage) Log(limit int) []types.Commit {
+// If branch is empty, returns commits from current branch. If branch is specified, returns commits reachable from that branch.
+func (ds Database_storage) Log(limit int, branch string) []types.Commit {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 
-	rows, err := db.Query(`
-	SELECT hash, parent_hash, author, email, message, date 
-	FROM   commits
-	WHERE  hash = 
-	(SELECT commit_hash FROM head INNER JOIN refs ON head.name = refs.name);`)
+	// If no branch specified, use current branch from HEAD
+	if branch == "" {
+		branch = ds.getCurrentBranchName()
+	}
+
+	var query string
+	var args []interface{}
+	
+	// Get commits reachable from the specified branch using recursive CTE
+	if limit > 0 {
+		query = `
+		WITH RECURSIVE branch_commits(hash, parent_hash, author, email, message, date) AS (
+			SELECT c.hash, c.parent_hash, c.author, c.email, c.message, c.date
+			FROM commits c
+			WHERE c.hash = (SELECT commit_hash FROM refs WHERE name = ?)
+			UNION ALL
+			SELECT c.hash, c.parent_hash, c.author, c.email, c.message, c.date
+			FROM commits c
+			JOIN branch_commits bc ON c.hash = bc.parent_hash
+		)
+		SELECT hash, parent_hash, author, email, message, date 
+		FROM branch_commits
+		ORDER BY date DESC
+		LIMIT ?;`
+		args = []interface{}{branch, limit}
+	} else {
+		query = `
+		WITH RECURSIVE branch_commits(hash, parent_hash, author, email, message, date) AS (
+			SELECT c.hash, c.parent_hash, c.author, c.email, c.message, c.date
+			FROM commits c
+			WHERE c.hash = (SELECT commit_hash FROM refs WHERE name = ?)
+			UNION ALL
+			SELECT c.hash, c.parent_hash, c.author, c.email, c.message, c.date
+			FROM commits c
+			JOIN branch_commits bc ON c.hash = bc.parent_hash
+		)
+		SELECT hash, parent_hash, author, email, message, date 
+		FROM branch_commits
+		ORDER BY date DESC;`
+		args = []interface{}{branch}
+	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		panic(err)
 	}
 	var commits []types.Commit
 	if !rows.Next() {
-		// TODO: check why always prints
-		fmt.Println("no rows found")
 		return commits 
 	}
 	for  {
@@ -337,7 +351,6 @@ func (ds Database_storage) Log(limit int) []types.Commit {
 	return commits	
 }
 
-// TODO: actualy use limit. Now it returns only 1 set 
 func (ds Database_storage) GetObjectsFromLastCommits(limit int) []types.Object {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
@@ -398,7 +411,7 @@ func findObjectInSliceByHash(obj types.Object, slice []types.Object) int {
 func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[string]string {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
-	oursHash := hex.EncodeToString(ds.Log(1)[0].Hash[:])
+	oursHash := hex.EncodeToString(ds.Log(1, "")[0].Hash[:])
 	var theirsHash string 
 	rows, err := db.Query(`
 	select commit_hash from refs where name = ?;
@@ -478,7 +491,7 @@ func (ds Database_storage) ContinueMerge(theirBranch string) {
 	for _, object := range mergeResultObjects{
 		joinedObjectsHash += hex.EncodeToString(object.Hash[:])
 	}
-	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, "me", "me@mail.com", message, joinedObjectsHash)
+	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message, joinedObjectsHash)
 	commitHashSum := sha1.Sum([]byte(bytesForHash))
 	commitHash := hex.EncodeToString(commitHashSum[:])
 
@@ -496,7 +509,7 @@ func (ds Database_storage) ContinueMerge(theirBranch string) {
 	if _, err = db.Exec(`
 	INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
 	VALUES 				(?,?,  ?, ?, ?, ?, datetime("now"));
-	`, commitHash, parent1Hash, parent2Hash, "me", "me@mail.com", message); err != nil {
+	`, commitHash, parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message); err != nil {
 		panic(err)
 	}
 	// Move refs
@@ -652,7 +665,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, mergeResult
 			joinedObjectsHash += hex.EncodeToString(object.Hash[:])
 		}
 	}
-	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, "me", "me@mail.com", message, joinedObjectsHash)
+	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message, joinedObjectsHash)
 	commitHashSum := sha1.Sum([]byte(bytesForHash))
 	commitHash := hex.EncodeToString(commitHashSum[:])
 
@@ -678,7 +691,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, mergeResult
 	if _, err = db.Exec(`
 	INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
 	VALUES 				(?,?,  ?, ?, ?, ?, datetime("now"));
-	`, commitHash, parent1Hash, parent2Hash, "me", "me@mail.com", message); err != nil {
+	`, commitHash, parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message); err != nil {
 		panic(err)
 	}
 	// Move refs
@@ -723,7 +736,7 @@ func (ds Database_storage) Commit(message string) {
 		return
 	}
 
-	parent := ds.Log(1)
+	parent := ds.Log(1, "")
 	var parentHash string
 	if parent == nil {
 		parentHash = ""
@@ -736,13 +749,11 @@ func (ds Database_storage) Commit(message string) {
 	for _, object := range index {
 		mergedObjectsHash += hex.EncodeToString(object.Hash[:])
 	}
-	//TODO: insert email
-	bytesForHash := fmt.Sprintf("parent %s, author %s, message %s, objects %s", parentHash, "me", message, mergedObjectsHash)
+	bytesForHash := fmt.Sprintf("parent %s, author %s, email %s, message %s, objects %s", 
+		parentHash, types.AppConfig.AuthorName, types.AppConfig, message, mergedObjectsHash)
 	
 	commitHash := sha1.Sum([]byte(bytesForHash))
 	commitHashString := hex.EncodeToString(commitHash[:])
-	// TODO: return commitHashString
-	// fmt.Println(commitHashString)
 	for _, file := range index {
 		// Insert row about commited files in link table
 		if _, err = db.Exec(`
@@ -756,7 +767,7 @@ func (ds Database_storage) Commit(message string) {
     if _, err = db.Exec(`
     INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
 	VALUES 				(?,(select refs.commit_hash from head join refs on head.name = refs.name), null, ?, ?, ?, datetime("now"));
-    `, commitHashString, "me", "me@mail.com", message); err != nil {
+    `, commitHashString, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message); err != nil {
         panic(err)
     }
 
@@ -826,6 +837,22 @@ func (ds Database_storage) DeleteBranch(name string){
 	DELETE FROM refs WHERE name = ?;`, name); err != nil {
 		panic(err)
 	}
+}
+
+// Helper function to get current branch name from HEAD
+func (ds Database_storage) getCurrentBranchName() string {
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+
+	var curBranch string
+	row, err := db.Query("SELECT name FROM head;")
+	if err != nil {
+		panic(err)
+	}
+	for row.Next() {
+		row.Scan(&curBranch)
+	}
+	return curBranch
 }
 
 func (ds Database_storage) Branch() ([]string, string) {
