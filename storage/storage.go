@@ -17,7 +17,7 @@ type Storage interface{
 	Restore(bool, string, string) types.Object
 	GetObjectsFromLastCommits(int) []types.Object
 	GetObjectsFromCommit(string) []types.Object
-	FindHashesForMerge(string) map[string]string
+	FindCommitsForMerge(string) map[string]string
 	Log(int, string) []types.Commit
 	MoveHeadTo(string)
 	MoveIndexTo(string)

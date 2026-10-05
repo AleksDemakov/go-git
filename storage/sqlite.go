@@ -407,8 +407,10 @@ func findObjectInSliceByHash(obj types.Object, slice []types.Object) int {
 	}
 	return  -1
 }
-// FindHashesForMerge returns {"base":baseHash, "theirs":theirsHash, "ours":oursHash}
-func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[string]string {
+
+// FindCommitsForMerge returns {"base":baseHash, "theirs":theirsHash, "ours":oursHash}
+// returns Map instead of multiple values for better reading 
+func (ds Database_storage) FindCommitsForMerge(theirsBranchName string) map[string]string {
 	db, err := ds.openConnection()
     defer ds.closeConnection(db)
 	oursHash := hex.EncodeToString(ds.Log(1, "")[0].Hash[:])
@@ -442,19 +444,6 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	ORDER BY hit.depth DESC  
 	LIMIT 1;  
 	`, oursHash, theirsHash)
-//	rows, _ = db.Query(`
-//	with recursive commits_graph(hash, parent_hash) as (
-//		select hash, parent_hash from commits
-//	),
-// 	hit(hash, cnt) as (
-//		select ?, 1
-//		union all
-//		select ?, 1
-//		union all 
-//		select commits_graph.parent_hash, hit.cnt from hit join commits_graph on hit.hash = commits_graph.hash 
-//	)
-//	select hit.hash as cnt from hit where hit.hash is not null group by hit.hash order by cnt desc limit 1;
-//	`, oursHash, theirsHash)
 	var baseHash string 
 	for rows.Next(){
 		if err = rows.Scan(&baseHash); err != nil {panic(err)}
@@ -462,68 +451,105 @@ func (ds Database_storage) FindHashesForMerge(theirsBranchName string) map[strin
 	return map[string]string {"base": baseHash, "theirs": theirsHash, "ours": oursHash}
 }
 
+// updateIndexForMerge rebuilds the index table with merge results
+func (ds Database_storage) updateIndexForMerge(mergeResultObjects []types.Object) {
+	db, err := ds.openConnection()
+	defer ds.closeConnection(db)
+	if err != nil { panic(err) }
 
-// TODO: same code as merge()
+	// Recreate index table
+	if _, err := db.Exec(`DROP TABLE _index; CREATE TABLE _index(hash text primary key) without rowid;`); err != nil {
+		panic(err)
+	}
+
+	// Insert objects into index
+	for _, object := range mergeResultObjects {
+		if _, err = db.Exec(`INSERT INTO _index (hash) VALUES (?);`,
+			hex.EncodeToString(object.Hash[:])); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// createMergeCommit creates a merge commit with parent information and links objects
+func (ds Database_storage) createMergeCommit(parent1Hash, parent2Hash, message string, mergeResultObjects []types.Object) string {
+	db, err := ds.openConnection()
+	defer ds.closeConnection(db)
+	if err != nil { panic(err) }
+
+	// Calculate commit hash
+	var joinedObjectsHash string
+	for _, object := range mergeResultObjects {
+		joinedObjectsHash += hex.EncodeToString(object.Hash[:])
+	}
+	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s",
+		parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message, joinedObjectsHash)
+	commitHashSum := sha1.Sum([]byte(bytesForHash))
+	commitHash := hex.EncodeToString(commitHashSum[:])
+
+	// Insert objects into commit_object table
+	for _, object := range mergeResultObjects {
+		if _, err = db.Exec(`INSERT INTO commit_object (commit_hash, object_hash) VALUES (?, ?);`,
+			commitHash, hex.EncodeToString(object.Hash[:])); err != nil {
+			panic(err)
+		}
+	}
+
+	// Create commit
+	if _, err = db.Exec(`INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date)
+		VALUES (?, ?, ?, ?, ?, ?, datetime("now"));`,
+		commitHash, parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message); err != nil {
+		panic(err)
+	}
+
+	return commitHash
+}
+
+// updateMergeRefs moves the branch reference to the new merge commit
+func (ds Database_storage) updateMergeRefs(commitHash string) {
+	db, err := ds.openConnection()
+	defer ds.closeConnection(db)
+	if err != nil { panic(err) }
+
+	if _, err = db.Exec(`UPDATE refs SET commit_hash = ? WHERE name = (select name from head);`,
+		commitHash); err != nil {
+		panic(err)
+	}
+}
+
+
+// ContinueMerge continues a merge operation after conflicts have been resolved
 func (ds Database_storage) ContinueMerge(theirBranch string) {
 	db, err := ds.openConnection()
-	if err != nil {panic(err)}
-    defer ds.closeConnection(db)
+	if err != nil { panic(err) }
+	defer ds.closeConnection(db)
 
+	// Get conflict info from database
 	rows, _ := db.Query(`
 		SELECT merge_branch, orig_branch, commit_editmsg
 		FROM conflict
 	`)
 	var theirHash, ourHash, message string
 	for rows.Next() {
-		if err = rows.Scan(&theirHash, &ourHash, &message); err != nil {panic(err)}
+		if err = rows.Scan(&theirHash, &ourHash, &message); err != nil { panic(err) }
 	}
 
-	hashes := ds.FindHashesForMerge(theirBranch)
-	theirsHash := hashes["theirs"]
-	oursHash := hashes["ours"]
-	var parent1Hash, parent2Hash string
-	parent1Hash = oursHash
-	parent2Hash = theirsHash
-	var mergeResultObjects = ds.Index()
+	// Find commits for merge
+	hashes := ds.FindCommitsForMerge(theirBranch)
+	parent1Hash := ourHash  // From conflict table - this is the original branch
+	parent2Hash := hashes["theirs"]  // Their branch
 	
-	var joinedObjectsHash string
-	// combine all info about objects and commit for hash calculation
-	for _, object := range mergeResultObjects{
-		joinedObjectsHash += hex.EncodeToString(object.Hash[:])
-	}
-	bytesForHash := fmt.Sprintf("parent %s, parent2 %s, author %s, email %s, message %s, objects %s", parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message, joinedObjectsHash)
-	commitHashSum := sha1.Sum([]byte(bytesForHash))
-	commitHash := hex.EncodeToString(commitHashSum[:])
-
-	// insert objects in link table
-	// TODO: optimize. Many requests, mb unite into transaction or smth
-	// insert objects into link table
-	for _, object := range mergeResultObjects {
-		if _, err = db.Exec(`
-		INSERT INTO commit_object (commit_hash, object_hash) 
-		VALUES 		(?, ?);`, commitHash, hex.EncodeToString(object.Hash[:])); err != nil {panic(err)}
-	}
+	// Get merge result objects from index
+	mergeResultObjects := ds.Index()
 	
-
 	// Create merge commit
-	if _, err = db.Exec(`
-	INSERT INTO commits (hash, parent_hash, parent2_hash, author, email, message, date) 
-	VALUES 				(?,?,  ?, ?, ?, ?, datetime("now"));
-	`, commitHash, parent1Hash, parent2Hash, types.AppConfig.AuthorName, types.AppConfig.AuthorEmail, message); err != nil {
-		panic(err)
-	}
-	// Move refs
-	if _, err = db.Exec(`
-	UPDATE  refs
-	SET 	commit_hash = ? 
-	WHERE   name = (select name from head);
-	`, commitHash); err != nil {
-		panic(err)
-	}
+	commitHash := ds.createMergeCommit(parent1Hash, parent2Hash, message, mergeResultObjects)
+	
+	// Update refs
+	ds.updateMergeRefs(commitHash)
 
-	if _, err := db.Exec(`
-		DROP TABLE conflict;
-	`); err != nil {panic(err)}
+	// Clean up conflict table
+	if _, err := db.Exec(`DROP TABLE conflict;`); err != nil { panic(err) }
 }
 
 // TODO: write purpose of parameters
@@ -643,7 +669,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, mergeResult
 	}
 
 	message := fmt.Sprintf("Merge %s to %s", branchName, "HEAD")
-	hashes := ds.FindHashesForMerge(branchName)
+	hashes := ds.FindCommitsForMerge(branchName)
 	//baseHash := hashes["base"]
 	theirsHash := hashes["theirs"]
 	oursHash := hashes["ours"]
