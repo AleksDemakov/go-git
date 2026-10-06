@@ -147,7 +147,7 @@ func getUntrackedObjects() []types.Object {
 	}
 	return objectsNotInIndex
 }
-// TODO: refactor and write comments
+
 // TODO: print: 
 //Unmerged paths:
 //  (use "git add/rm <file>..." as appropriate to mark resolution)
@@ -157,6 +157,11 @@ func getUntrackedObjects() []types.Object {
 //    deleted by us:   file3.txt
 //    deleted by them: file4.txt
 func Status() {
+	
+	if adapter.IsConflictState() {
+		adapter.PrintUnmergedPaths()
+		return 
+	}
 	
 	_, curBranch := adapter.Branch()
 	fmt.Println("On branch ", curBranch)
@@ -171,14 +176,21 @@ func Status() {
 	workingTreeObjects := getWorkingTreeObjects(repoPath)
 
 
-	fmt.Println("Changes to be committed:")
-	fmt.Println("  Not implemented -> (use \"git restore --staged <file>...\" to unstage)")
+	var tobeCommited []string 
 	for _, object := range index {
+		// if object from index is not in las commit
 		if id := findObjectInSliceByHash(object, lastCommitObjects); id ==  -1{
-			fmt.Println("    " + object.Path)
+			tobeCommited = append(tobeCommited, object.Path)
 		}
 	}
-
+	
+	if len(tobeCommited) > 0 {
+		fmt.Println("Changes to be committed:")
+		fmt.Println("  Not implemented -> (use \"git restore --staged <file>...\" to unstage)")
+		for _, path := range tobeCommited{
+			fmt.Println("    " + path)
+		}
+	}
 
 	var objectsNotStaged []types.Object
 	for _, object := range index{

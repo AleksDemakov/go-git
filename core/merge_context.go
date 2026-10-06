@@ -76,7 +76,6 @@ func (ctx *MergeContext) Init() error {
 	return nil
 }
 
-// validate checks if merge can proceed
 // Validate checks if merge can proceed
 func (ctx *MergeContext) Validate() error {
 	if adapter.IsConflictState() {
@@ -85,7 +84,6 @@ func (ctx *MergeContext) Validate() error {
 	return nil
 }
 
-// handleTrivialStrategy handles "ours" and "theirs" merge strategies
 // HandleTrivialStrategy handles "ours" and "theirs" merge strategies
 func (ctx *MergeContext) HandleTrivialStrategy() {
 	workingTreeTransformer := workingTreeTransform{}
@@ -97,7 +95,6 @@ func (ctx *MergeContext) HandleTrivialStrategy() {
 	adapter.Merge(ctx.TheirsBranch, ctx.Strategy, []types.Object{}, []types.ConflictFile{})
 }
 
-// analyzeConflicts performs conflict analysis between the three sets of objects
 // AnalyzeConflicts performs conflict analysis between the three sets of objects
 func (ctx *MergeContext) AnalyzeConflicts() {
 	// Reset state
@@ -153,7 +150,7 @@ func (ctx *MergeContext) AnalyzeConflicts() {
 			oursObj := ctx.OursObjects[idInOurs]
 			if baseObj.Hash != oursObj.Hash {
 				baseObj.Flag = "CE_CONFLICTED_0"
-				oursObj.Flag = "CE_CONFLICTED"
+				oursObj.Flag = "CE_CONFLICTED_1"
 				ctx.ConflictObjects = append(ctx.ConflictObjects, types.ConflictFile{baseObj, oursObj, oursObj, types.TheirDeleted})
 			}
 			// file not changed but deleted in ours. Then delete
@@ -177,8 +174,8 @@ func (ctx *MergeContext) AnalyzeConflicts() {
 				oursObj := ctx.OursObjects[idInOurs]
 				// different content. Conflict
 				if theirObj.Hash != oursObj.Hash {
-					oursObj.Flag = "CE_CONFLICTED"
-					theirObj.Flag = "CE_CONFLICTED"
+					oursObj.Flag = "CE_CONFLICTED_1"
+					theirObj.Flag = "CE_CONFLICTED_2"
 					ctx.ConflictObjects = append(ctx.ConflictObjects,
 						types.ConflictFile{
 							ctx.BaseObjects[idInBase],
@@ -212,7 +209,6 @@ func (ctx *MergeContext) AnalyzeConflicts() {
 	ctx.HasConflicts = len(ctx.ConflictObjects) > 0
 }
 
-// resolveConflicts handles conflict resolution with git markers
 // ResolveConflicts handles conflict resolution with git markers
 func (ctx *MergeContext) ResolveConflicts() {
 	// Clear messages

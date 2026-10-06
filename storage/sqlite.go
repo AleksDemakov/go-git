@@ -293,7 +293,7 @@ func (ds Database_storage) Log(limit int, branch string) []types.Commit {
 
 	// If no branch specified, use current branch from HEAD
 	if branch == "" {
-		branch = ds.getCurrentBranchName()
+		_, branch = ds.Branch()
 	}
 
 	var query string
@@ -517,6 +517,25 @@ func (ds Database_storage) updateMergeRefs(commitHash string) {
 	}
 }
 
+func (ds Database_storage) GracefullyAbortMerge() string {
+	db, err := ds.openConnection()
+	if err != nil { panic(err) }
+	defer ds.closeConnection(db)
+
+	// Get conflict info from database
+	rows, _ := db.Query(`
+		SELECT orig_branch
+		FROM conflict
+	`)
+	var ourHash string
+	for rows.Next() {
+		if err = rows.Scan(&ourHash); err != nil { panic(err) }
+	}
+
+	// Clean up conflict table
+	if _, err := db.Exec(`DROP TABLE conflict;`); err != nil { panic(err) }
+	return ourHash
+}
 
 // ContinueMerge continues a merge operation after conflicts have been resolved
 func (ds Database_storage) ContinueMerge(theirBranch string) {
@@ -552,6 +571,59 @@ func (ds Database_storage) ContinueMerge(theirBranch string) {
 	if _, err := db.Exec(`DROP TABLE conflict;`); err != nil { panic(err) }
 }
 
+func (ds Database_storage) PrintUnmergedPaths(){
+	db, err := ds.openConnection()
+    defer ds.closeConnection(db)
+	
+	fmt.Println("You have unmerged paths.")
+	fmt.Println("(fix conflicts and run \"git commit\")")
+	fmt.Println("Unmerged paths:")
+	fmt.Println("  (use \"git add <file>...\" to mark resolution)")
+	
+	// Query all conflicted objects with their flags
+	rows, err := db.Query(`
+		SELECT path, flag FROM objects
+		WHERE flag like 'CE_CONFLICTED_%'
+		ORDER BY path, flag;
+	`)
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	
+	// Map to track which flags exist for each path
+	pathFlags := make(map[string]map[string]bool)
+	
+	for rows.Next() {
+		var path, flag string
+		if err := rows.Scan(&path, &flag); err != nil {
+			panic(err)
+		}
+		if pathFlags[path] == nil {
+			pathFlags[path] = make(map[string]bool)
+		}
+		pathFlags[path][flag] = true
+	}
+	
+	// Determine conflict type for each path based on flag combinations
+	for path, flags := range pathFlags {
+		has0 := flags["CE_CONFLICTED_0"]
+		has1 := flags["CE_CONFLICTED_1"]
+		has2 := flags["CE_CONFLICTED_2"]
+		
+		if has0 && has1 && has2 {
+			// All three flags present: both modified
+			fmt.Printf("  both modified:   %s\n", path)
+		} else if has0 && has2 {
+			// CE_CONFLICTED_0 and CE_CONFLICTED_2: deleted by us (in ours)
+			fmt.Printf("  deleted by us:   %s\n", path)
+		} else if has0 && has1 {
+			// CE_CONFLICTED_0 and CE_CONFLICTED_1: deleted by them (in theirs)
+			fmt.Printf("  deleted by them: %s\n", path)
+		}
+	}
+}
+
 // TODO: write purpose of parameters
 // TODO: use references in conflictedFile type
 // mergeResultObjects is slice of non conflict objects after merging 
@@ -561,26 +633,7 @@ func (ds Database_storage) Merge(branchName string, strategy string, mergeResult
 
 	// Check for conflict state
 	if ds.IsConflictState() {
-		rows, err := db.Query(`
-			SELECT path FROM objects
-			WHERE flag = 'CE_CONFLICT'
-		`)
-		if err != nil {
-			panic(err)
-		}
-		defer rows.Close()
-		
-		fmt.Println("You have unmerged paths.")
-		fmt.Println("(fix conflicts and run \"git commit\")")
-		fmt.Println("Unmerged paths:")
-		fmt.Println("  (use \"git add <file>...\" to mark resolution)")
-		for rows.Next() {
-			var path string
-			if err := rows.Scan(&path); err != nil {
-				panic(err)
-			}
-			fmt.Printf("  both modified:   %s\n", path)
-		}
+		ds.PrintUnmergedPaths()
 		return
 	}
 
@@ -739,26 +792,7 @@ func (ds Database_storage) Commit(message string) {
 
 	// Check for conflict state
 	if ds.IsConflictState() {
-		rows, err := db.Query(`
-			SELECT path FROM objects
-			WHERE flag = 'CE_CONFLICT'
-		`)
-		if err != nil {
-			panic(err)
-		}
-		defer rows.Close()
-		
-		fmt.Println("You have unmerged paths.")
-		fmt.Println("(fix conflicts and run \"git commit\")")
-		fmt.Println("Unmerged paths:")
-		fmt.Println("  (use \"git add <file>...\" to mark resolution)")
-		for rows.Next() {
-			var path string
-			if err := rows.Scan(&path); err != nil {
-				panic(err)
-			}
-			fmt.Printf("  both modified:   %s\n", path)
-		}
+		ds.PrintUnmergedPaths()
 		return
 	}
 
@@ -865,21 +899,6 @@ func (ds Database_storage) DeleteBranch(name string){
 	}
 }
 
-// Helper function to get current branch name from HEAD
-func (ds Database_storage) getCurrentBranchName() string {
-	db, err := ds.openConnection()
-    defer ds.closeConnection(db)
-
-	var curBranch string
-	row, err := db.Query("SELECT name FROM head;")
-	if err != nil {
-		panic(err)
-	}
-	for row.Next() {
-		row.Scan(&curBranch)
-	}
-	return curBranch
-}
 
 func (ds Database_storage) Branch() ([]string, string) {
 	db, err := ds.openConnection()
@@ -953,9 +972,9 @@ func (ds Database_storage) Restore(staged bool, source string, filename string) 
 	} else {
 		// restore file in working tree from the index	
 		rows, err := db.Query(`
-		SELECT object.hash, object.path, object.size, object.content 
+		SELECT objects.hash, objects.path, objects.size, objects.content 
 		FROM _index INNER JOIN objects 
-		ON _index.hash = object.hash AND object.path = ?;`, filename)
+		ON _index.hash = objects.hash AND objects.path = ?;`, filename)
 		if err != nil {panic(err)}
 		for rows.Next() {
 			obj := getObjectFromRows(rows)
@@ -984,38 +1003,6 @@ func (ds Database_storage) IsConflictResolved(conflictedObjects []types.Conflict
         return false
     }
 
-//	index := ds.Index()
-//	var conflictSolved bool = true
-//	for _, conflictObject := range conflictedObjects {
-//		if conflictObject.Conflict == types.BothModified {
-//			// index must contain file to resolve conflict
-//			if findObjectInSliceByPath(conflictObject.Ours, index) == -1 {
-//				conflictSolved = false 
-//				break
-//			}
-//		}
-//		if conflictObject.Conflict == types.TheirDeleted {
-//			// if a file was removed from index or our version is saved 
-//			if !(findObjectInSliceByHash(conflictObject.Ours, index) == -1 &&
-//			   findObjectInSliceByHash(conflictObject.Theirs, index) == -1 || 
-//			   findObjectInSliceByPath(conflictObject.Ours, index) != -1 ) {
-//				conflictSolved = false 
-//				break 
-//			}
-//		}
-//		if conflictObject.Conflict == types.OurDeleted {
-//			// if a file was removed from index or their version is saved 
-//			if !(findObjectInSliceByHash(conflictObject.Ours, index) == -1 &&
-//			   findObjectInSliceByHash(conflictObject.Theirs, index) == -1  || 
-//			   findObjectInSliceByPath(conflictObject.Theirs, index) != -1 ){
-//				conflictSolved = false 
-//				break 
-//			}
-//		}
-//	}
-//	// Conflict resolved if conflict table exists in db (there was a conflict earlier) and 
-//	// now it is solved in index and working tree
-//	return conflictSolved && !ds.IsConflictState() &&   conflictTableExists 
 	return  !ds.IsConflictState() &&   conflictTableExists 
 }
 
@@ -1028,7 +1015,7 @@ func (ds Database_storage) IsConflictState() bool {
 	err = db.QueryRow(`
 		SELECT COUNT(*)
 		FROM _index INNER JOIN objects ON _index.hash = objects.hash
-		WHERE objects.flag LIKE 'CE_CONFLICT_%'
+		WHERE objects.flag LIKE 'CE_CONFLICTED_%'
 	`).Scan(&count)
 	if err != nil {
 		panic(err)

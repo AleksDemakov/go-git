@@ -77,6 +77,7 @@ func main() {
 
 	mergeCmd := flag.NewFlagSet("merge", flag.ExitOnError)
 	mergeStrategyFlag := mergeCmd.String("s", "", "merge strategy")
+	mergeAbortFlag := mergeCmd.Bool("abort", false, "abort unsuccessful merge")
 
 	command := os.Args[1] 
 	switch command {
@@ -99,7 +100,11 @@ func main() {
 		}
 	case "merge":
 		mergeCmd.Parse(os.Args[2:])
-		core.Merge(mergeCmd.Args()[0], *mergeStrategyFlag)
+		if *mergeAbortFlag {
+			core.AbortMerge()
+		} else {
+			core.Merge(mergeCmd.Args()[0], *mergeStrategyFlag)
+		}
 	case "diff":
 		if len(os.Args) < 4 {
 			fmt.Println("Usage: go-git diff <file1> <file2> [output]")

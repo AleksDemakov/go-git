@@ -50,3 +50,14 @@ func Merge(theirsBranch string, strategy string) {
 	// Apply final result to working tree, index, and commit
 	ctx.ApplyResult()
 }
+
+func AbortMerge () {
+	if !adapter.IsConflictState() {
+		fmt.Println("There is no merge to abort")
+		return
+	}
+	// doing before checkout in order to pass conflicted merge validation
+	curHash := adapter.GracefullyAbortMerge()
+	Checkout(curHash)
+	
+}

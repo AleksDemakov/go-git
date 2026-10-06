@@ -30,6 +30,10 @@ type Commit struct {
 	Message string
 	Date string
 }
+func (c Commit) RichString() string {
+	return fmt.Sprintf("Commit: %s\nAuthor: %s <%s>\nDate: %s\n\t%s\n", 
+		hex.EncodeToString(c.Hash[:]), c.Author, c.Email, c.Date, c.Message)
+}
 
 // a link struct between commits and commited files
 type Commit_objects struct {
@@ -59,10 +63,6 @@ type ConflictFile struct {
 	Conflict ConflictType
 }
 
-func (c Commit) RichString() string {
-	return fmt.Sprintf("Commit: %s\nAuthor: %s <%s>\nDate: %s\n\t%s\n", 
-		hex.EncodeToString(c.Hash[:]), c.Author, c.Email, c.Date, c.Message)
-}
 
 func NewObject(filepath_ string) Object {
 	content, err := os.ReadFile(filepath_)

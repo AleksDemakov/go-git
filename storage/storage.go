@@ -10,7 +10,7 @@ type Storage interface{
     AddDeletedFile(string)
     Commit(string)
 	Index() []types.Object
-	Branch() ([]string, string)
+	Branch() ([]string, string) 
 	NewBranch(string)
 	DeleteBranch(string)
 	SearchRepoMeta() string
@@ -22,6 +22,8 @@ type Storage interface{
 	MoveHeadTo(string)
 	MoveIndexTo(string)
 	Merge(string, string, []types.Object, []types.ConflictFile)
+	PrintUnmergedPaths()
+	GracefullyAbortMerge() string
 	ContinueMerge(string )
 	IsConflictState() bool
 	IsConflictResolved([]types.ConflictFile) bool
