@@ -7,8 +7,27 @@ import (
 type Storage interface{
     Init() 
     Add(types.Object)
-    Get() types.Object
+    AddDeletedFile(string)
     Commit(string)
-	Status() []types.Object
+	Index() []types.Object
+	Branch() ([]string, string) 
+	NewBranch(string)
+	DeleteBranch(string)
+	SearchRepoMeta() string
+	Restore(bool, string, string) types.Object
+	GetObjectsFromLastCommits(int) []types.Object
+	GetObjectsFromCommit(string) []types.Object
+	FindCommitsForMerge(string) map[string]string
+	Log(int, string) []types.Commit
+	MoveHeadTo(string)
+	MoveIndexTo(string)
+	Merge(string, string, []types.Object, []types.ConflictFile)
+	PrintUnmergedPaths()
+	GracefullyAbortMerge() string
+	ContinueMerge(string )
+	IsConflictState() bool
+	IsConflictResolved([]types.ConflictFile) bool
+	Rm(bool, string)
+
 }
 

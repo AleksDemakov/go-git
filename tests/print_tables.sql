@@ -1,0 +1,12 @@
+select printf('OBJECTS'); 
+SELECT * FROM objects;
+select printf('COMMIT_OBJECT'); 
+SELECT * FROM commit_object;
+SELECT printf('COMMITS'); 
+SELECT * FROM commits;
+SELECT printf('HEAD'); 
+SELECT * FROM head;
+SELECT printf('REFS'); 
+SELECT * FROM refs;
+SELECT printf('INDEX'); 
+SELECT * FROM _index;
